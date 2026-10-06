@@ -1,0 +1,64 @@
+name: Pages
+
+# Serves the web page at the address in .nsite/config.json from GitHub Pages. The files are those of the signed site
+# manifest (kind 35128) on the relays, each checked against its sha256 as it is downloaded from a Blossom server.
+# Nothing is built here, so the page is byte for byte the nsite. On the schedule it deploys only when the manifest's
+# index.html differs from the one served; started by hand it always deploys. No secrets are needed: the manifest and
+# the files are public.
+on:
+  schedule:
+    - cron: '7,37 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-24.04
+    outputs:
+      deploy: ${{ steps.mirror.outputs.deploy }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: |
+            .nsite
+            .npmrc
+            pipeline
+            package.json
+            package-lock.json
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      # No install scripts: nothing from the dependency tree runs here.
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - id: mirror
+        env:
+          UNLESS_SERVED: ${{ github.event_name == 'schedule' && '--unless-served' || '' }}
+        run: |
+          npx tsx pipeline/mirror-nostr.ts site $UNLESS_SERVED
+          if [ -f site/index.html ]; then echo deploy=true; else echo deploy=false; fi >> "$GITHUB_OUTPUT"
+      - if: steps.mirror.outputs.deploy == 'true'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  # Runs no project code and installs nothing; the only job that may write to Pages.
+  deploy:
+    needs: mirror
+    if: needs.mirror.outputs.deploy == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

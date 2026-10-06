@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<title>stepstr dev shell</title>
+		<style>
+			body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr 150px; font: 13px system-ui, sans-serif; background: #ddd; }
+			header { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; padding: 8px; background: #fff; border-bottom: 1px solid #bbb; }
+			header .group { display: flex; flex-direction: column; gap: 4px; }
+			iframe { border: 0; width: 100%; height: 100%; background: #fff; }
+			pre { margin: 0; padding: 6px 8px; overflow: auto; font: 11px ui-monospace, monospace; background: #222; color: #ddd; }
+			textarea { width: 420px; height: 58px; font: 11px ui-monospace, monospace; }
+			#meter { font-variant-numeric: tabular-nums; color: #555; }
+			#spinner { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #e2561b; }
+			#consent { position: fixed; inset: 0; display: none; place-items: center; background: rgb(0 0 0 / 0.3); }
+			#consent div { background: #fff; padding: 16px; border-radius: 10px; display: grid; gap: 8px; }
+			#insecure { margin: 0; padding: 6px 8px; max-width: 640px; border-radius: 6px; background: #fde2d6; color: #7a2508; }
+		</style>
+	</head>
+	<body>
+		<header>
+			<div class="group">
+				<strong>stepstr dev shell</strong>
+				<label><input id="parity" type="checkbox" checked /> Paja parity: CSP, sniffer, 10 MiB</label>
+				<label><input id="dark" type="checkbox" /> dark shell theme</label>
+				<label title="Offer outbox (Nostr reads), fs (file picker) and storage (512 KB, kept in this page's storage) to the napplet">
+					<input id="extra" type="checkbox" checked /> outbox + fs + storage
+				</label>
+			</div>
+			<div class="group">
+				<select id="preset"></select>
+				<textarea id="payload" spellcheck="false"></textarea>
+			</div>
+			<div class="group">
+				<select id="topic">
+					<option>napplet:3d-model/open</option>
+					<option>3d-model:open</option>
+				</select>
+				<button id="deliver">Deliver intent</button>
+				<label>as data: <input id="file" type="file" /></label>
+			</div>
+			<div class="group">
+				<span><span id="spinner"></span> <span id="meter"></span></span>
+				<span id="status"></span>
+				<button id="reload">Reload napplet</button>
+			</div>
+			<p id="insecure" hidden></p>
+		</header>
+		<iframe id="frame" sandbox="allow-scripts" title="napplet"></iframe>
+		<pre id="log"></pre>
+		<div id="consent"><div><span>The napplet asks for a file.</span><button id="choose">Choose a file…</button><button id="deny">Deny</button></div></div>
+		<script type="module">
+			const $ = (id) => document.getElementById(id);
+			// Over http from another device the page is no secure context: this shell cannot check the files it fetches by
+			// hash (crypto.subtle), the converter among them, and Paja does not start at all (crypto.randomUUID).
+			if (!isSecureContext) {
+				$('insecure').hidden = false;
+				$('insecure').textContent = `This page is not a secure context (http from a network address), so the shell cannot check what it fetches by hash, and the napplet gets no converter. In Chrome, open chrome://flags/#unsafely-treat-insecure-origin-as-secure, add ${location.origin}, and relaunch.`;
+			}
+			const frame = $('frame');
+			const logEl = $('log');
+			const subscriptions = new Set();
+			const PAJA_CSP =
+				"default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; worker-src 'none'; child-src 'none'; frame-src 'none'; media-src 'none'; object-src 'none'; manifest-src 'none'; base-uri 'none'; form-action 'none'";
+			const MAX = 10 * 1024 * 1024;
+			// The napplet's storage, kept in this page's own, so it outlives a reload of the napplet or of the shell.
+			const stored = window.localStorage;
+			const STORE = 'napplet:stepstr:';
+			const STORAGE_QUOTA = 512 * 1024;
+			const storedKeys = () => Object.keys(stored).filter((key) => key.startsWith(STORE)).map((key) => key.slice(STORE.length));
+			// What a smoke test can read.
+			window.seen = { envelopes: [], resources: [], links: [], jank: { maxGap: 0, over50: 0 } };
+			const log = (line) => {
+				logEl.textContent += `${line}\n`;
+				logEl.scrollTop = logEl.scrollHeight;
+			};
+			const post = (message) => frame.contentWindow.postMessage(message, '*');
+			const theme = () => ({
+				colors: $('dark').checked ? { background: '#101418', text: '#e6e6e6', primary: '#4fa3ff' } : { background: '#f7f7f2', text: '#1c1c1a', primary: '#e2561b' }
+			});
+
+			const PRESETS = {
+				'GitHub link, Seed (5 MB)': { url: 'https://github.com/Gangleri42/sh-hardware/blob/23b847f7e1aa74086b380d3f92700685dd36e0e6/seed/Seed-v15.step' },
+				'GitHub link, Hammer (20 MB: too large under parity)': { url: 'https://raw.githubusercontent.com/Gangleri42/sh-hardware/2cf15c5954fb21efe963a68d4b696d15fd2cafb9/hammer/Hammer-v50.step' },
+				'stlstr-style preview payload': { url: 'https://raw.githubusercontent.com/Gangleri42/sh-hardware/23b847f7e1aa74086b380d3f92700685dd36e0e6/seed/Seed-v15.step', name: 'Seed controller', mime: 'model/step', size: '5053446', ui: 'preview' },
+				'with a view': { url: 'https://raw.githubusercontent.com/Gangleri42/sh-hardware/23b847f7e1aa74086b380d3f92700685dd36e0e6/seed/Seed-v15.step', view: 'cut=z:10&ortho=1' },
+				'a link that cannot work': { url: 'http://example.com/part.step' }
+			};
+			for (const name of Object.keys(PRESETS)) $('preset').append(new Option(name, name));
+			const showPreset = () => ($('payload').value = JSON.stringify(PRESETS[$('preset').value], null, 1));
+			$('preset').onchange = showPreset;
+			showPreset();
+
+			let pending = null;
+			const deliver = (topic, payload) => {
+				if (!subscriptions.has(topic)) {
+					pending = { topic, payload };
+					$('status').textContent = `waiting for a subscription to ${topic}`;
+					return;
+				}
+				window.seen.jank = { maxGap: 0, over50: 0 };
+				post({ type: 'inc.event', topic, payload, sender: 'dev-shell' });
+				$('status').textContent = `delivered ${topic}`;
+			};
+			$('deliver').onclick = () => deliver($('topic').value, JSON.parse($('payload').value));
+			$('file').onchange = async (e) => {
+				const file = e.target.files[0];
+				if (file) deliver($('topic').value, { data: new Blob([await file.arrayBuffer()]), name: file.name });
+				e.target.value = '';
+			};
+			$('dark').onchange = () => post({ type: 'theme.changed', theme: theme() });
+
+			// The shell's own frame loop: a long gap means the napplet's work froze the shell too.
+			let last = performance.now();
+			const tick = (now) => {
+				const gap = now - last;
+				last = now;
+				const j = window.seen.jank;
+				j.maxGap = Math.max(j.maxGap, gap);
+				if (gap > 50) j.over50++;
+				$('spinner').style.transform = `translateX(${(now / 6) % 30}px)`;
+				$('meter').textContent = `shell frame gaps since last delivery: max ${j.maxGap.toFixed(0)} ms, ${j.over50} over 50 ms`;
+				requestAnimationFrame(tick);
+			};
+			requestAnimationFrame(tick);
+
+			// Paja's resource policy: bytes are classified by sniffing; only images, audio, video, fonts and UTF-8 text pass.
+			const sniff = (bytes) => {
+				const sig = [[0x89, 0x50, 0x4e, 0x47], [0xff, 0xd8, 0xff], [0x47, 0x49, 0x46, 0x38], [0x77, 0x4f, 0x46, 0x46], [0x77, 0x4f, 0x46, 0x32]];
+				const types = ['image/png', 'image/jpeg', 'image/gif', 'font/woff', 'font/woff2'];
+				for (let i = 0; i < sig.length; i++) if (sig[i].every((b, k) => bytes[k] === b)) return types[i];
+				if (bytes.includes(0)) return null;
+				try {
+					new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+					return 'text/plain';
+				} catch {
+					return null;
+				}
+			};
+			const fail = (code, message) => Object.assign(new Error(message), { code });
+			async function fetchBytes(url, servers) {
+				const blossom = /^blossom:sha256:([0-9a-f]{64})$/.exec(url);
+				// A blob this shell holds (the napplet's own files) first, then the servers the napplet names.
+				const candidates = blossom ? [`/blob/${blossom[1]}`, ...(servers ?? []).map((s) => `${s.replace(/\/+$/, '')}/${blossom[1]}`)] : [url];
+				if (!candidates.length) throw fail('not-found', 'no server hint');
+				let last = fail('not-found', 'nothing found');
+				for (const candidate of candidates) {
+					try {
+						const response = await fetch(candidate, { credentials: 'omit', referrerPolicy: 'no-referrer' });
+						if (!response.ok) {
+							last = fail('not-found', `${response.status}`);
+							continue;
+						}
+						const bytes = new Uint8Array(await response.arrayBuffer());
+						if (blossom) {
+							const digest = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map((b) => b.toString(16).padStart(2, '0')).join('');
+							if (digest !== blossom[1]) {
+								last = fail('decode-failed', 'hash mismatch');
+								continue;
+							}
+						}
+						return bytes;
+					} catch (err) {
+						last = err.code ? err : fail('network-error', String(err));
+					}
+				}
+				throw last;
+			}
+
+			// Files the napplet picked, by the virtual path handed back.
+			const picked = new Map();
+			let pickRequest = null;
+			$('choose').onclick = () => {
+				const input = Object.assign(document.createElement('input'), { type: 'file' });
+				input.onchange = () => {
+					const file = input.files[0];
+					$('consent').style.display = 'none';
+					if (!file || !pickRequest) return;
+					const path = `/picked/${picked.size}/${file.name}`;
+					picked.set(path, file);
+					post({ type: 'fs.pickFile.result', id: pickRequest, result: { entries: [{ path, kind: 'file', name: file.name, size: file.size, permissions: ['read'] }] } });
+					pickRequest = null;
+				};
+				input.click();
+			};
+			$('deny').onclick = () => {
+				$('consent').style.display = 'none';
+				post({ type: 'fs.pickFile.result', id: pickRequest, result: { entries: [] } });
+				pickRequest = null;
+			};
+
+			const server = (path, data) => fetch(path, { method: 'POST', body: JSON.stringify(data) }).then((r) => r.json());
+
+			addEventListener('message', async (event) => {
+				if (event.source !== frame.contentWindow) return;
+				const m = event.data;
+				if (!m || typeof m !== 'object' || typeof m.type !== 'string') return;
+				window.seen.envelopes.push(m.type);
+				log(`← ${m.type} ${JSON.stringify({ ...m, type: undefined }).slice(0, 160)}`);
+				const parity = $('parity').checked;
+				switch (m.type) {
+					case 'shell.ready':
+						post({ type: 'shell.init', capabilities: { domains: ['shell', ...domains()] }, services: [] });
+						break;
+					case 'inc.subscribe':
+						subscriptions.add(m.topic);
+						post({ type: 'inc.subscribe.result', id: m.id });
+						if (pending && pending.topic === m.topic) {
+							const { topic, payload } = pending;
+							pending = null;
+							deliver(topic, payload);
+						}
+						break;
+					case 'inc.unsubscribe':
+						subscriptions.delete(m.topic);
+						break;
+					case 'theme.get':
+						post({ type: 'theme.get.result', id: m.id, theme: theme() });
+						break;
+					case 'resource.info':
+						post({ type: 'resource.info.result', id: m.id, info: { schemes: ['data', 'https', 'blossom'].map((scheme) => ({ scheme, enabled: true })), ...(parity ? { maxBytes: MAX } : {}) } });
+						break;
+					case 'resource.bytes': {
+						window.seen.resources.push(m.url);
+						try {
+							const bytes = await fetchBytes(m.url, m.servers);
+							let mime = 'application/octet-stream';
+							if (parity) {
+								if (bytes.length > MAX) throw fail('too-large', `${bytes.length} bytes`);
+								mime = sniff(bytes);
+								if (!mime) throw fail('decode-failed', 'not an allowed type');
+							}
+							post({ type: 'resource.bytes.result', id: m.id, blob: new Blob([bytes], { type: mime }), mime });
+						} catch (err) {
+							post({ type: 'resource.bytes.error', id: m.id, error: err.code ?? 'network-error', message: String(err.message) });
+						}
+						break;
+					}
+					case 'link.open':
+						window.seen.links.push(m.url);
+						window.open(m.url, '_blank', 'noopener,noreferrer');
+						post({ type: 'link.open.result', id: m.id, status: 'opened' });
+						break;
+					case 'outbox.getEvent': {
+						const event = await server('/nostr/get', { id: m.eventId, author: m.options?.author, relays: m.options?.relays }).catch(() => null);
+						post({ type: 'outbox.getEvent.result', id: m.id, ...(event ? { result: { event } } : { error: 'not-found' }) });
+						break;
+					}
+					case 'outbox.query': {
+						const events = await server('/nostr/query', { filters: m.filters, relays: m.options?.relays }).catch(() => []);
+						post({ type: 'outbox.query.result', id: m.id, events: events.map((event) => ({ event })) });
+						break;
+					}
+					case 'storage.get':
+						post({ type: 'storage.get.result', id: m.id, value: stored.getItem(STORE + m.key) });
+						break;
+					case 'storage.set': {
+						// Paja's quota: 512 KB for all of a napplet's keys and values.
+						const used = storedKeys().reduce((n, key) => n + (key === m.key ? 0 : key.length + (stored.getItem(STORE + key)?.length ?? 0)), 0);
+						if (used + m.key.length + String(m.value).length > STORAGE_QUOTA) post({ type: 'storage.set.result', id: m.id, error: 'quota-exceeded' });
+						else {
+							stored.setItem(STORE + m.key, String(m.value));
+							post({ type: 'storage.set.result', id: m.id });
+						}
+						break;
+					}
+					case 'storage.remove':
+						stored.removeItem(STORE + m.key);
+						post({ type: 'storage.remove.result', id: m.id });
+						break;
+					case 'storage.keys':
+						post({ type: 'storage.keys.result', id: m.id, keys: storedKeys() });
+						break;
+					case 'fs.info':
+						post({ type: 'fs.info.result', id: m.id, info: { roots: [], limits: { maxReadBytes: 4 * 1024 * 1024, maxWriteBytes: 0 } } });
+						break;
+					case 'fs.pickFile':
+						// A picker needs a click on the shell's own page: ask, the way a real shell asks for consent.
+						pickRequest = m.id;
+						$('consent').style.display = 'grid';
+						break;
+					case 'fs.read': {
+						const file = picked.get(m.path);
+						if (!file) {
+							post({ type: 'fs.read.result', id: m.id, error: 'not-found' });
+							break;
+						}
+						const offset = m.options?.offset ?? 0;
+						const bytes = new Uint8Array(await file.slice(offset, offset + (m.options?.length ?? file.size)).arrayBuffer());
+						let binary = '';
+						for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+						post({ type: 'fs.read.result', id: m.id, result: { data: btoa(binary), offset, bytesRead: bytes.length, eof: offset + bytes.length >= file.size, size: file.size } });
+						break;
+					}
+				}
+			});
+
+			const domains = () => ['inc', 'resource', 'theme', 'link', ...($('extra').checked ? ['outbox', 'fs', 'storage'] : [])];
+			async function load() {
+				subscriptions.clear();
+				let html = await (await fetch(`/napplet.html?domains=${domains().join(',')}`)).text();
+				if ($('parity').checked) html = html.replace(/<head>/i, `<head><meta http-equiv="Content-Security-Policy" content="${PAJA_CSP}">`);
+				frame.srcdoc = html;
+				$('status').textContent = `loaded ${(html.length / 1e6).toFixed(2)} MB into the sandbox${$('parity').checked ? ' with Paja’s CSP' : ''}`;
+			}
+			$('reload').onclick = load;
+			$('parity').onchange = load;
+			$('extra').onchange = load;
+			load();
+		</script>
+	</body>
+</html>

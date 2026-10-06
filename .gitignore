@@ -1,0 +1,38 @@
+node_modules
+
+# Builds
+/.svelte-kit
+/build
+/dist-napplet
+
+# OS and editors
+.DS_Store
+.idea
+*.swp
+
+# Env
+.env
+.env.*
+
+# Vite
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+# Converter build: the OpenCascade checkout and objects (converter/build.sh), and the built module.
+/converter/.build
+/converter/dist
+
+# The oracle's Python bytecode
+__pycache__
+*.pyc
+
+# Local caches, the test files among them (scripts/fixtures.mjs)
+/.cache
+
+# Browser test output
+/test-results
+/playwright-report
+
+# Signer material, never committed
+*.nbunksec
+*.nsec

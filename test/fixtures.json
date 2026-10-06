@@ -1,0 +1,14 @@
+{
+	"seed-v15": {
+		"file": "Seed-v15.step",
+		"sha256": "9380f4da945e7706ef03095d83102248196bef3add5bd0c72570ca124dcaa5f1",
+		"size": 5053446,
+		"urls": ["https://raw.githubusercontent.com/Gangleri42/sh-hardware/23b847f7e1aa74086b380d3f92700685dd36e0e6/seed/Seed-v15.step"]
+	},
+	"hammer-v50": {
+		"file": "Hammer-v50.step",
+		"sha256": "4c16c5f7ac702f78ec1bba90cafdca3fc191a922cf8e3ab6b0880e6af0508beb",
+		"size": 19998715,
+		"urls": ["https://raw.githubusercontent.com/Gangleri42/sh-hardware/2cf15c5954fb21efe963a68d4b696d15fd2cafb9/hammer/Hammer-v50.step"]
+	}
+}

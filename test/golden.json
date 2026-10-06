@@ -1,0 +1,38 @@
+{
+	"seed-v15": {
+		"solids": 53,
+		"triangles": 24598,
+		"unit": "mm",
+		"warnings": [],
+		"glb": "54b831730a18c0c5ed9521d7f63ec2c3e76a7180ae3ccbdb051bc94446ae8987",
+		"measure": "9b9a8e2987ea15ed873cf58d036ade43788bd5050001597e5554527500039695"
+	},
+	"seed-v15 planned": {
+		"solids": 53,
+		"triangles": 24598,
+		"unit": "mm",
+		"warnings": [],
+		"glb": "54b831730a18c0c5ed9521d7f63ec2c3e76a7180ae3ccbdb051bc94446ae8987",
+		"measure": "9b9a8e2987ea15ed873cf58d036ade43788bd5050001597e5554527500039695"
+	},
+	"hammer-v50": {
+		"solids": 110,
+		"triangles": 427716,
+		"unit": "cm",
+		"warnings": [
+			"hammer_nose: 1 face(s) meshed as NURBS after BRepMesh gave up"
+		],
+		"glb": "ade2b555aa079151a842d3d0e4fb6b0406a5c46917c627dbf53ff44c142f2643",
+		"measure": "ea1ec7469e53a3ee326148aacd791b297935a0830935afcd543c8c1d9020b947"
+	},
+	"hammer-v50 planned": {
+		"solids": 110,
+		"triangles": 503164,
+		"unit": "cm",
+		"warnings": [
+			"hammer_nose: 1 face(s) meshed as NURBS after BRepMesh gave up"
+		],
+		"glb": "7167ca1a39ea28eb32169fcde923de11496fd5a430b073f175fa49eef1ae1dfb",
+		"measure": "cf915b4567d5c5a032e83d83696fd3d42227637585b187e096fa709c10a6421b"
+	}
+}

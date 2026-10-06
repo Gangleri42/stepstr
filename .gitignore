@@ -17,6 +17,7 @@ node_modules
 # Vite
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+vite.*.config.ts.timestamp-*
 
 # Converter build: the OpenCascade checkout and objects (converter/build.sh), and the built module.
 /converter/.build

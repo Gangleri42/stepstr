@@ -22,6 +22,7 @@
 	import { applyVisibility } from '$lib/viewer/parts';
 	import { applyFinishes } from '$lib/viewer/finishes';
 	import type { NamedView, RenderOptions, Viewer } from '$lib/viewer/scene';
+	import type { Object3D } from 'three';
 	import { title } from 'virtual:stepstr-site';
 
 	let { host }: { host: Host } = $props();
@@ -268,11 +269,11 @@
 			const buffer = glb.byteOffset === 0 && glb.byteLength === glb.buffer.byteLength ? glb.buffer : glb.slice().buffer;
 			// The up axis the link names, before the model is framed.
 			scene.setUp(wanted.up, false);
-			const index = await scene.loadBuffer(buffer as ArrayBuffer, () => !signal.aborted);
-			if (!index || signal.aborted) return;
-			// The finishes the catalogue gives this version's parts, before the first frame shows the model.
+			// The finishes the catalogue gives this version's parts, before the model is set up and shown.
 			const finishes = listed?.version.finishes;
-			if (finishes?.length) scene.restyle((root) => applyFinishes(root, finishes));
+			const prepare = finishes?.length ? (root: Object3D) => applyFinishes(root, finishes) : undefined;
+			const index = await scene.loadBuffer(buffer as ArrayBuffer, () => !signal.aborted, prepare);
+			if (!index || signal.aborted) return;
 
 			// Pin the route to the bytes it showed, so its part ids and measurements keep their meaning. A catalogue model's
 			// route names the version the catalogue gave, by its id.

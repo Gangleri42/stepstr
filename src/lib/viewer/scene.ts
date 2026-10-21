@@ -76,16 +76,6 @@ function isPowerVR(gl: WebGLRenderingContext | WebGL2RenderingContext) {
 	return !!info && /PowerVR|Imagination/i.test(String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)));
 }
 
-/** Every material of a model's meshes and lines. */
-function materialsOf(model: THREE.Object3D) {
-	const materials = new Set<THREE.Material>();
-	model.traverse((object) => {
-		const material = (object as THREE.Mesh).material;
-		if (material) for (const one of [material].flat()) materials.add(one);
-	});
-	return materials;
-}
-
 /** The floor's normal before it is turned square to the up axis: a plane geometry faces +Z. */
 const PLANE_NORMAL = new THREE.Vector3(0, 0, 1);
 
@@ -154,8 +144,6 @@ export class Viewer {
 	#edges: THREE.LineBasicMaterial[] = [];
 	#highlight = new Map<THREE.Material, THREE.MeshStandardMaterial>();
 	#highlighted: { mesh: THREE.Mesh; material: THREE.Material }[] = [];
-	#highlightedPart: Part | null = null;
-	#cuts: Cut[] = [];
 	#accent = new THREE.Color('#e2561b');
 	#pointers = new Map<number, { x: number; y: number }>();
 	#multiTouch = false;
@@ -351,14 +339,16 @@ export class Viewer {
 	}
 
 	/**
-	 * Replaces the model with a GLB's bytes and returns its part index. When `wanted` turns false meanwhile (a newer
-	 * request came in), the parsed model is thrown away, the scene is left alone and null comes back. Nothing on screen
-	 * changes before the new model is complete, so a failed load leaves the old one in place.
+	 * Replaces the model with a GLB's bytes and returns its part index. `prepare` may change the parsed model first, such
+	 * as its parts' finishes or a part swapped for another model's: it gets the root in the file's frame, and what it
+	 * leaves is set up as the file's own nodes and materials would be. When `wanted` turns false meanwhile (a newer request
+	 * came in), the parsed model is thrown away, the scene is left alone and null comes back. Nothing on screen changes
+	 * before the new model is complete, so a failed load, or a `prepare` that throws, leaves the old one in place.
 	 */
-	async loadBuffer(buffer: ArrayBuffer, wanted: () => boolean = () => true) {
+	async loadBuffer(buffer: ArrayBuffer, wanted: () => boolean = () => true, prepare?: (root: THREE.Object3D) => void) {
 		const model = (await this.loader.parseAsync(buffer, '')).scene;
 		if (!wanted()) {
-			this.#release(model);
+			this.release(model);
 			return null;
 		}
 		// The GLB root carries glTF's metres and Y-up; drop it so node coordinates are the CAD file's again.
@@ -366,10 +356,19 @@ export class Viewer {
 		root.position.set(0, 0, 0);
 		root.quaternion.identity();
 		root.scale.set(1, 1, 1);
+		if (prepare) {
+			try {
+				prepare(root);
+			} catch (err) {
+				this.release(model);
+				throw err;
+			}
+		}
 		if (this.model) {
 			this.#tool?.detach();
 			this.scene.remove(this.model);
-			this.#release(this.model, this.#highlight.values());
+			for (const tinted of this.#highlight.values()) tinted.dispose();
+			this.release(this.model);
 		}
 		this.#targets = null;
 		this.model = model;
@@ -377,7 +376,6 @@ export class Viewer {
 		this.#edges = [];
 		this.#highlight.clear();
 		this.#highlighted = [];
-		this.#highlightedPart = null;
 		const edgeMaterials = new Map<THREE.Material, THREE.LineBasicMaterial>();
 		this.model.traverse((object) => {
 			const line = object as THREE.LineSegments;
@@ -421,37 +419,11 @@ export class Viewer {
 	}
 
 	/**
-	 * Changes the model on screen in place, such as its parts' finishes (finishes.ts), and treats its materials as a load
-	 * does: glass reflects as glass, the section's caps and planes follow the new materials, the highlight is drawn over
-	 * them, and the materials no mesh uses any more are freed.
+	 * Frees a model that leaves the scene, or one parsed that never went in: its geometries and its materials, section
+	 * caps included.
 	 */
-	restyle(change: (root: THREE.Object3D) => void) {
-		const model = this.model;
-		if (!model) return;
-		const part = this.#highlightedPart;
-		this.highlight(null);
-		for (const tinted of this.#highlight.values()) tinted.dispose();
-		this.#highlight.clear();
-		const caps: THREE.Object3D[] = [];
-		model.traverse((object) => object.userData.cap && caps.push(object));
-		for (const cap of caps) cap.removeFromParent();
-		const before = materialsOf(model);
-		change(model.children[0]);
-		const after = materialsOf(model);
-		for (const material of before) if (!after.has(material)) material.dispose();
-		model.traverse((object) => {
-			const mesh = object as THREE.Mesh;
-			if (mesh.isMesh) reflectiveGlass(mesh.material as THREE.MeshStandardMaterial);
-		});
-		this.section.attach(model.children[0]);
-		this.setCuts(this.#cuts);
-		this.#targets = null;
-		this.highlight(part);
-	}
-
-	/** Frees a model that leaves the scene: its geometries, its materials (section caps included) and any extras. */
-	#release(model: THREE.Object3D, extra: Iterable<THREE.Material> = []) {
-		const materials = new Set<THREE.Material>(extra);
+	release(model: THREE.Object3D) {
+		const materials = new Set<THREE.Material>();
 		model.traverse((object) => {
 			const mesh = object as THREE.Mesh;
 			mesh.geometry?.dispose();
@@ -630,7 +602,6 @@ export class Viewer {
 	}
 
 	setCuts(cuts: Cut[]) {
-		this.#cuts = cuts;
 		this.section.set(cuts);
 		for (const [source, tinted] of this.#highlight) tinted.clippingPlanes = source.clippingPlanes;
 		this.requestRender();
@@ -646,7 +617,6 @@ export class Viewer {
 	highlight(part: Part | null) {
 		for (const { mesh, material } of this.#highlighted) mesh.material = material;
 		this.#highlighted = [];
-		this.#highlightedPart = part;
 		for (const mesh of part?.meshes ?? []) {
 			const source = mesh.material as THREE.MeshStandardMaterial;
 			let tinted = this.#highlight.get(source);

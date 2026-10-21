@@ -9,6 +9,12 @@
 //   5. publishes the site manifest (35128) with a snapshot (5128), then the napplet manifest (35129) with its snapshot (5129)
 //   6. fetches everything back from the relays and checks the signatures and the manifests
 // Usage: npm run publish:nostr -- [--if-changed] [--dry-run] [--skip-build] [--skip-napplet] [--replace-lists] [--no-snapshot] [--min-public N]
+//        npm run publish:nostr -- --files-only [--dry-run] [--min-public N]
+// --files-only does step 2 for the catalogue's files alone, verified as step 3 verifies them, and stops: no build, no
+// site or napplet files, no lists, no manifests, no snapshots. A site's builder runs it to have a new version's files on
+// the servers before the catalogue that names them is published. With --dry-run it says which files each server lacks.
+// The copies a run verified, files-only or not, go in a record beside the site (nostr/verified.ts), which every later
+// run reads.
 // It runs only where STEPSTR_PUBLISHER=1 is set, beside a saved signer: a NIP-46 session with Amber on a phone, or a key
 // (nostr/signer.ts says where each is kept). Anywhere else it refuses to start, dry runs included, since those talk to
 // the relays and servers too.
@@ -21,17 +27,18 @@ import { parseArgs } from 'node:util';
 import type { Event, EventTemplate } from 'nostr-tools/core';
 import * as nip19 from 'nostr-tools/nip19';
 import { verifyEvent } from 'nostr-tools/pure';
-import { parseCatalogue } from '../src/lib/catalogue/catalogue.ts';
 import { download, extOf, head } from './nostr/blossom.ts';
 import { catalogueEntries } from './nostr/catalogue-files.ts';
 import { chunksNeeded } from './nostr/carry.ts';
 import { KIND, LOOKUP_RELAYS, mimeOf, readConfig } from './nostr/config.ts';
 import { mergeRelayList, mergeServerList } from './nostr/lists.ts';
-import { aggregate, collectFiles, NAPPLET_TEMPLATE, nappletOptions, nappletTemplate, siteTemplate, snapshotTemplate, tagValue, tagValues, validate, verifiedPairs, type FileEntry } from './nostr/manifest.ts';
+import { aggregate, collectFiles, NAPPLET_TEMPLATE, nappletOptions, nappletTemplate, siteTemplate, snapshotTemplate, tagValue, validate, type FileEntry } from './nostr/manifest.ts';
 import { siteOrigin, snapshotOrigin } from './nostr/nsite.ts';
 import { Relays, type PublishReport } from './nostr/relays.ts';
 import { openSigner, type Signer } from './nostr/signer.ts';
-import { holdingAll, siteServers, spread, SpreadError, type Spread } from './nostr/spread.ts';
+import { uploadFiles } from './nostr/files-only.ts';
+import { batchedAuth, holdingAll, siteServers, spread, SpreadError, type Spread } from './nostr/spread.ts';
+import { readRecord, verifiedBefore, writeRecord } from './nostr/verified.ts';
 import { readCatalogue, SITE, STEPSTR_DIR } from './site.ts';
 
 const log = (line = '') => console.log(line);
@@ -55,6 +62,7 @@ const { values } = (() => {
 				'skip-napplet': { type: 'boolean' },
 				'replace-lists': { type: 'boolean' },
 				'no-snapshot': { type: 'boolean' },
+				'files-only': { type: 'boolean' },
 				'min-public': { type: 'string', default: '3' }
 			}
 		});
@@ -71,14 +79,89 @@ const opts = {
 	skipNapplet: !!values['skip-napplet'],
 	replaceLists: !!values['replace-lists'],
 	snapshot: !values['no-snapshot'],
+	filesOnly: !!values['files-only'],
 	minPublic
 };
+// The other flags are about the site, the napplet and the manifests, which a files-only run leaves alone.
+const siteFlags = (['if-changed', 'skip-build', 'skip-napplet', 'replace-lists', 'no-snapshot'] as const).filter((flag) => values[flag]);
+if (opts.filesOnly && siteFlags.length) fail(`--files-only publishes no site, napplet, lists or manifests; leave out --${siteFlags.join(', --')}`);
 
 const config = readConfig(SITE.config);
 const npub = nip19.npubEncode(config.pubkey);
 const ownServer = config.servers[0];
 const ownRelay = config.relays[0];
 const unixNow = () => Math.floor(Date.now() / 1000);
+
+const relays = new Relays();
+const readRelays = [...new Set([...config.relays, ...config.archiveRelays])];
+
+const listed = (event: Event | null) => new Map(event?.tags.filter((t) => t[0] === 'path').map((t) => [t[1], t[2]]) ?? []);
+
+// Blobs fetched from the project's server, by sha256: previous files read below, and bytes for re-uploads later.
+const fetched = new Map<string, Uint8Array>();
+const fromOwnServer = async (sha256: string, path: string) => {
+	const cached = fetched.get(sha256);
+	if (cached) return cached;
+	const data = await download(ownServer, sha256, extOf(path));
+	if (data) fetched.set(sha256, data);
+	return data;
+};
+
+// The files the site's catalogue names, which no manifest lists: the viewer finds them by hash in catalogue.json.
+const catalogue = (() => {
+	try {
+		return readCatalogue()?.catalogue ?? null;
+	} catch (err) {
+		fail(err instanceof Error ? err.message : String(err));
+	}
+})();
+const catalogued: FileEntry[] = (() => {
+	try {
+		return catalogue ? catalogueEntries(catalogue, SITE.catalogueFiles) : [];
+	} catch (err) {
+		fail(err instanceof Error ? err.message : String(err));
+	}
+})();
+
+const megabytes = (entries: { bytes: number }[]) => (entries.reduce((n, e) => n + e.bytes, 0) / 1e6).toFixed(2);
+
+/** The catalogue a site manifest lists, as published, with the manifest: its files were verified on its servers. */
+async function publishedCatalogue(siteManifest: Event | null) {
+	const published = listed(siteManifest).get('/catalogue.json');
+	const bytes = published ? await fromOwnServer(published, '/catalogue.json') : null;
+	return siteManifest && bytes ? { site: siteManifest, bytes } : null;
+}
+
+// ---- files only: the catalogue's files, spread as a full publish spreads them, and nothing else -------------------
+
+if (opts.filesOnly) {
+	if (!catalogue) fail(`${SITE.catalogue} is missing; --files-only uploads the files a catalogue names`);
+	log(`\ncatalogue files of site ${config.id} for ${npub}: ${catalogued.length} files, ${megabytes(catalogued)} MB`);
+	log(`  servers ${config.servers.join(', ')}`);
+	log('  no site files, napplet, lists, manifests or snapshots\n');
+	const options = { servers: config.servers, entries: catalogued, minPublic: opts.minPublic, log };
+	if (opts.dryRun) {
+		await uploadFiles({ ...options, dryRun: true });
+		relays.destroy();
+		process.exit(0);
+	}
+	const { event: siteManifest } = await relays.latest(readRelays, { kinds: [KIND.site], authors: [config.pubkey], '#d': [config.id] });
+	const before = verifiedBefore({ manifests: [], catalogue: await publishedCatalogue(siteManifest), record: readRecord(SITE.verified) });
+	const signer: Signer = await openSigner(config.pubkey).catch((err: unknown) => fail(err instanceof Error ? err.message : String(err)));
+	log(`signing as ${signer.npub}\nchecking servers (BUD-06 preflight per file type), then placing files`);
+	try {
+		const out = await uploadFiles({ ...options, verifiedBefore: before, record: SITE.verified, sign: (template) => signer.signEvent(template), content: `Publish ${config.title}` });
+		for (const [server, types] of out.refused) log(`  ${server} holds no ${types.join(', ')}`);
+		log(`\nuploaded: the catalogue's files are on ${holdingAll(out, config.servers, catalogued).length} servers`);
+	} catch (err) {
+		await signer.close();
+		relays.destroy();
+		fail(err instanceof SpreadError ? err.message : String(err));
+	}
+	await signer.close();
+	relays.destroy();
+	process.exit(0);
+}
 
 // ---- build and file sets --------------------------------------------------------------------------------------------
 
@@ -92,26 +175,11 @@ if (!opts.skipBuild) {
 if (!existsSync(`${SITE.build}/index.html`)) fail(`${SITE.build}/index.html is missing; run npm run build`);
 
 const site = collectFiles(SITE.build);
-const relays = new Relays();
-const readRelays = [...new Set([...config.relays, ...config.archiveRelays])];
-
 // The manifests as the relays have them now: the record an unattended run works from.
 const current = {
 	site: (await relays.latest(readRelays, { kinds: [KIND.site], authors: [config.pubkey], '#d': [config.id] })).event,
 	napplet: opts.skipNapplet ? null : (await relays.latest(readRelays, { kinds: [KIND.napplet], authors: [config.pubkey], '#d': [config.id] })).event
 };
-const listed = (event: Event | null) => new Map(event?.tags.filter((t) => t[0] === 'path').map((t) => [t[1], t[2]]) ?? []);
-
-// Blobs fetched from the project's server, by sha256: previous files read below, and bytes for re-uploads later.
-const fetched = new Map<string, Uint8Array>();
-const fromOwnServer = async (sha256: string, path: string) => {
-	const cached = fetched.get(sha256);
-	if (cached) return cached;
-	const data = await download(ownServer, sha256, extOf(path));
-	if (data) fetched.set(sha256, data);
-	return data;
-};
-
 // A returning browser may hold the previous index.html for an hour, so the hashed files it loads stay in the manifest
 // for one more deploy. They are found by following that index.html's imports through the manifest on the relays;
 // files it carried from older deploys drop out. A first deploy has nothing to carry, and when the old index.html
@@ -139,25 +207,8 @@ const declared = opts.skipNapplet ? null : nappletOptions(JSON.parse(readFileSyn
 if (declared && declared.id !== config.id) fail(`the napplet was built as "${declared.id}", the site id is "${config.id}"; build it again`);
 if (declared && declared.artifact !== page?.sha256) fail(`${SITE.napplet}/${NAPPLET_TEMPLATE} names another index.html than ${SITE.napplet} has; run npm run build:napplet`);
 
-// The files the site's catalogue names, which no manifest lists: the viewer finds them by hash in catalogue.json.
-const catalogue = (() => {
-	try {
-		return readCatalogue()?.catalogue ?? null;
-	} catch (err) {
-		fail(err instanceof Error ? err.message : String(err));
-	}
-})();
-const catalogued: FileEntry[] = (() => {
-	try {
-		return catalogue ? catalogueEntries(catalogue, SITE.catalogueFiles) : [];
-	} catch (err) {
-		fail(err instanceof Error ? err.message : String(err));
-	}
-})();
-
 const uploads: FileEntry[] = [...site, ...napplet];
 const everything: FileEntry[] = [...uploads, ...catalogued.filter((c) => !uploads.some((u) => u.sha256 === c.sha256)), ...previous];
-const megabytes = (entries: { bytes: number }[]) => (entries.reduce((n, e) => n + e.bytes, 0) / 1e6).toFixed(2);
 
 log(`\nsite ${config.id} for ${npub}`);
 log(`  ${site.length} files, ${megabytes(site)} MB, aggregate ${aggregate([...site, ...previous]).slice(0, 16)}…`);
@@ -209,65 +260,22 @@ const shutdown = async () => {
 	relays.destroy();
 };
 
-// One upload authorisation covers a batch of hashes on every server, so a run signs a handful of tokens, not hundreds.
-// The token is scoped by the file hashes and a short expiry only. BUD-11's optional `server` tags are read
-// differently by the servers out there (hzrd149's blossom-server wants the bare domain, blssm.us and nsite.run
-// reject anything but a URL), and a hash-scoped token replayed elsewhere can only place the same public bytes. A
-// batch's token is signed again a minute before it expires; a server that wants a token minted just before the
-// transfer gets one of its own each time (nostr/spread.ts).
-const batches = new Map<string, FileEntry[]>();
-for (let i = 0; i < everything.length; i += 20) {
-	const batch = everything.slice(i, i + 20);
-	for (const entry of batch) batches.set(entry.sha256, batch);
-}
-const EXPIRY = 600;
-const authorisation = (hashes: string[], lifetime = EXPIRY) => {
-	const signed = unixNow();
-	return signer.signEvent({
-		kind: KIND.blobAuth,
-		created_at: signed,
-		content: `Publish ${config.title}`,
-		tags: [['t', 'upload'], ['expiration', String(signed + lifetime)], ...hashes.map((sha256) => ['x', sha256])]
-	});
-};
-// The servers of one file are served at once, so a batch keeps its pending signature and they all wait for that one.
-const auths = new Map<FileEntry[], { signed: number; auth: Promise<Event> }>();
-const auth = {
-	batched(entry: { sha256: string }): Promise<Event> {
-		const batch = batches.get(entry.sha256)!;
-		const cached = auths.get(batch);
-		if (cached && unixNow() - cached.signed < EXPIRY - 60) return cached.auth;
-		const signed = unixNow();
-		const pending = authorisation(batch.map((e) => e.sha256));
-		auths.set(batch, { signed, auth: pending });
-		return pending;
-	},
-	fresh: (entry: { sha256: string }) => authorisation([entry.sha256], 300)
-};
 
 // ---- blobs: which servers take which types, then to the project's server and from it to the rest, then verified ---
 
 // What the manifests on the relays list was verified on their servers before they went out; finding those files
-// there again while placing, at their size, is enough.
-const verifiedBefore = verifiedPairs([current.site, current.napplet]);
-// No manifest names the converter: the napplet's page does, by hash. The converter the published page names was
-// verified with it, on the same servers.
+// there again while placing, at their size, is enough. No manifest names the converter: the napplet's page does, by
+// hash, and it was verified with the page. Nor the files the catalogue names: the published one was verified on the
+// site manifest's servers, and what earlier runs verified is in the record (nostr/verified.ts).
 const publishedPage = current.napplet && tagValue(current.napplet, 'x');
 const pageBytes = publishedPage ? await fromOwnServer(publishedPage, '/index.html') : null;
 const publishedConverter = pageBytes ? /blossom:sha256:([0-9a-f]{64})/.exec(new TextDecoder().decode(pageBytes))?.[1] : undefined;
-if (current.napplet && publishedConverter) for (const server of tagValues(current.napplet, 'server')) verifiedBefore.add(`${server} ${publishedConverter}`);
-// Nor the files the published catalogue names. Each copy of them was verified where it was placed or found, on the
-// servers the site manifest lists; a server there that refused a type holds none of it, and is asked again.
-const publishedCatalogue = listed(current.site).get('/catalogue.json');
-const catalogueBytes = publishedCatalogue ? await fromOwnServer(publishedCatalogue, '/catalogue.json') : null;
-if (current.site && catalogueBytes) {
-	try {
-		const before = catalogueEntries(parseCatalogue(JSON.parse(new TextDecoder().decode(catalogueBytes))), '', false);
-		for (const server of tagValues(current.site, 'server')) for (const entry of before) verifiedBefore.add(`${server} ${entry.sha256}`);
-	} catch {
-		// A catalogue that cannot be read lists nothing: every copy is downloaded again.
-	}
-}
+const before = verifiedBefore({
+	manifests: [current.site, current.napplet],
+	converter: current.napplet && publishedConverter ? { sha256: publishedConverter, napplet: current.napplet } : null,
+	catalogue: await publishedCatalogue(current.site),
+	record: readRecord(SITE.verified)
+});
 
 log('\nchecking servers (BUD-06 preflight per file type), then placing files');
 let spreadOut: Spread;
@@ -275,17 +283,19 @@ try {
 	spreadOut = await spread({
 		servers: config.servers,
 		entries: everything,
-		verifiedBefore,
+		verifiedBefore: before,
 		minPublic: opts.minPublic,
 		// The local file, or for a chunk carried over from the previous deploy, a verified copy from the project's server.
 		bytesOf: async (entry) => (entry.file ? readFileSync(entry.file) : fromOwnServer(entry.sha256, entry.path)),
-		auth,
+		auth: batchedAuth(everything, (template) => signer.signEvent(template), `Publish ${config.title}`),
 		log
 	});
 } catch (err) {
 	await shutdown();
 	fail(err instanceof SpreadError ? err.message : String(err));
 }
+// What this run verified, for the next one, as a files-only run keeps it.
+writeRecord(SITE.verified, spreadOut, config.servers, catalogued);
 const lostPrevious = new Set(spreadOut.lost.map((entry) => entry.path));
 const carried = previous.filter((p) => !lostPrevious.has(p.path));
 if (lostPrevious.size) log(`  ${lostPrevious.size} previous chunk paths are no longer on ${ownServer} and are dropped`);

@@ -21,6 +21,8 @@ export type SitePaths = {
 	build: string;
 	/** The napplet build: index.html, converter.txt and the manifest template. */
 	napplet: string;
+	/** The copies of the catalogue's files a files-only publish verified, which no manifest lists yet. Never published. */
+	verified: string;
 };
 
 export const STEPSTR_DIR = fileURLToPath(new URL('..', import.meta.url));
@@ -34,7 +36,8 @@ export function sitePaths(dir: string): SitePaths {
 		catalogue: join(at, 'catalogue.json'),
 		catalogueFiles: join(at, 'catalogue-files'),
 		build: join(at, 'build'),
-		napplet: join(at, 'dist-napplet')
+		napplet: join(at, 'dist-napplet'),
+		verified: join(at, '.cache/verified-copies.json')
 	};
 }
 

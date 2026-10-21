@@ -1,74 +1,14 @@
-// Spreading files over Blossom servers, against servers stubbed at fetch: each holds blobs by sha256 and can refuse a
-// type, refuse an authorisation signed a while ago, or lack the mirror endpoint.
-import { createHash } from 'node:crypto';
-import type { Event } from 'nostr-tools/core';
+// Spreading files over Blossom servers, against servers stubbed at fetch (stub-servers.ts), and the authorisations a
+// publish signs for it.
+import type { Event, EventTemplate } from 'nostr-tools/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FileEntry } from './manifest.ts';
-import { holdingAll, siteServers, spread, SpreadError, type SpreadOptions } from './spread.ts';
+import { batchedAuth, holdingAll, siteServers, spread, SpreadError, type SpreadOptions } from './spread.ts';
+import { file, NOW, world } from './stub-servers.ts';
 
-const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
-const NOW = 1_800_000_000;
-
-type Server = {
-	blobs: Map<string, Uint8Array>;
-	/** Types it refuses at preflight. */
-	refuses?: string[];
-	/** It refuses an authorisation signed more than two minutes before the request. */
-	strict?: boolean;
-	/** It has no mirror endpoint. */
-	noMirror?: boolean;
-	/** What was asked of it: "<method> <path>". */
-	calls: string[];
-};
-
-function file(name: string, type: string, text: string): FileEntry & { data: Uint8Array } {
-	const data = new TextEncoder().encode(text);
-	return { path: `/${name}`, sha256: sha256(data), bytes: data.length, type, file: name, data };
-}
 const page = file('index.html', 'text/html', '<!doctype html>');
 const model = file('lamp.glb', 'model/gltf-binary', 'glTF and more');
 const measure = file('lamp.measure.json.gz', 'application/gzip', 'measured');
-
-/** Servers stubbed at fetch, by origin. */
-function world(spec: Record<string, Partial<Server>>) {
-	const servers = Object.fromEntries(Object.entries(spec).map(([origin, s]) => [origin, { blobs: new Map(), calls: [], ...s } as Server]));
-	vi.stubGlobal('fetch', async (input: string, init: RequestInit = {}) => {
-		const url = new URL(input);
-		const server = servers[url.origin];
-		const method = init.method ?? 'GET';
-		if (!server) throw new TypeError('fetch failed');
-		server.calls.push(`${method} ${url.pathname}`);
-		const headers = new Headers(init.headers);
-		const authorisation = headers.get('authorization');
-		const event = authorisation ? (JSON.parse(Buffer.from(authorisation.slice(6), 'base64url').toString()) as Event) : null;
-		const refuse = (status: number, reason: string) => new Response(null, { status, headers: { 'x-reason': reason } });
-		if (event && server.strict && NOW - event.created_at > 120) return refuse(401, 'authorisation too old');
-		const hash = /^\/([0-9a-f]{64})/.exec(url.pathname)?.[1];
-		if (hash) {
-			const blob = server.blobs.get(hash);
-			if (!blob) return new Response(null, { status: 404 });
-			return new Response(method === 'HEAD' ? null : (blob.slice().buffer as ArrayBuffer), { headers: { 'content-length': String(blob.length) } });
-		}
-		if (url.pathname === '/upload' && method === 'HEAD') {
-			return server.refuses?.includes(headers.get('x-content-type') ?? '') ? refuse(415, 'type not allowed') : new Response(null, { status: 200 });
-		}
-		if (url.pathname === '/upload' && method === 'PUT') {
-			const body = new Uint8Array(init.body as Uint8Array);
-			server.blobs.set(sha256(body), body);
-			return new Response('{}', { status: 201 });
-		}
-		if (url.pathname === '/mirror' && method === 'PUT') {
-			if (server.noMirror) return new Response(null, { status: 404 });
-			const from = new URL(JSON.parse(init.body as string).url);
-			const blob = servers[from.origin]?.blobs.get(from.pathname.slice(1).split('.')[0]);
-			if (!blob) return refuse(502, 'could not fetch it');
-			server.blobs.set(sha256(blob), blob);
-			return new Response('{}', { status: 201 });
-		}
-		return new Response(null, { status: 404 });
-	});
-	return servers;
-}
 
 /** Authorisations as the publisher signs them: the batched ones a few minutes old by the time they are used. */
 function authorisations() {
@@ -137,12 +77,44 @@ describe('spreading files over Blossom servers', () => {
 		expect(servers[B].calls.filter((c) => c === 'HEAD /upload')).toHaveLength(2);
 	});
 
+	it('does the same for a server that takes each authorisation once and says so with a 400', async () => {
+		const servers = world({ [OWN]: {}, [A]: { once: true }, [B]: {} });
+		let id = 0;
+		const auth = batchedAuth([page, model], async (template) => ({ ...template, id: String(++id), pubkey: 'p', sig: 's' }) as Event, 'Publish', () => NOW);
+		const lines: string[] = [];
+		const out = await spread({ ...options([OWN, A, B], [page, model]), auth, log: (line) => lines.push(line) });
+		expect(out.holders.get(page.sha256)).toEqual([OWN, A, B]);
+		expect(out.holders.get(model.sha256)).toEqual([OWN, A, B]);
+		expect(out.refused).toEqual(new Map());
+		expect(servers[A].blobs.size).toBe(2);
+		expect(lines).toContain(`  ${A} refused the batch's authorisation; it gets one signed just before each transfer`);
+	});
+
+	it('takes a type from a server that holds its probe, without asking it', async () => {
+		const small = file('lamp-small.glb', 'model/gltf-binary', 'glTF');
+		const servers = world({ [OWN]: {}, [A]: { refusesHeld: true, blobs: new Map([[model.sha256, model.data]]) } });
+		const out = await spread(options([OWN, A], [model, small]));
+		expect(out.refused).toEqual(new Map());
+		expect(out.holders.get(small.sha256)).toEqual([OWN, A]);
+		expect(servers[A].calls).not.toContain('HEAD /upload');
+	});
+
+	it('keeps a 400 about the file as the refusal once a fresh authorisation gets one too', async () => {
+		const { auth, signed } = authorisations();
+		vi.stubGlobal('fetch', async () => new Response(null, { status: 400, headers: { 'x-reason': 'unsupported content type: model/gltf-binary' } }));
+		const lines: string[] = [];
+		await expect(spread({ ...options([OWN, A], [model]), auth, log: (line) => lines.push(line) })).rejects.toThrow(/refuses model\/gltf-binary;/);
+		expect(signed.fresh).toEqual([model.sha256, model.sha256]);
+		expect(lines).toContain(`  skip ${A}: refuses model/gltf-binary (400 unsupported content type: model/gltf-binary)`);
+		expect(lines.some((line) => line.includes('signed just before'))).toBe(false);
+	});
+
 	it('downloads a copy an earlier publish verified only when the server reports another size', async () => {
 		const servers = world({ [OWN]: { blobs: new Map([[page.sha256, page.data]]) }, [A]: { blobs: new Map([[page.sha256, new Uint8Array(3)]]) } });
 		await expect(spread(options([OWN, A], [page], { verifiedBefore: new Set([`${OWN} ${page.sha256}`, `${A} ${page.sha256}`]) }))).rejects.toThrow(
 			'1 files reach fewer than 1 public servers: /index.html (0)'
 		);
-		expect(servers[OWN].calls).toEqual(['HEAD /upload', `HEAD /${page.sha256}`]);
+		expect(servers[OWN].calls).toEqual([`HEAD /${page.sha256}`, `HEAD /${page.sha256}`]);
 		expect(servers[A].calls).toContain(`GET /${page.sha256}.html`);
 	});
 
@@ -164,5 +136,36 @@ describe('spreading files over Blossom servers', () => {
 		expect((await spread(options([OWN, A, B], [page]))).holders.get(page.sha256)).toEqual([OWN, A]);
 		world({ [OWN]: { refuses: ['text/html'] }, [A]: {} });
 		await expect(spread(options([OWN, A], [page]))).rejects.toThrow("https://own.example.com, the site's own server, refuses text/html");
+	});
+});
+
+describe('the authorisations a publish signs', () => {
+	const entries = Array.from({ length: 45 }, (_, i) => file(`part${i}.glb`, 'model/gltf-binary', `part ${i}`));
+	const signing = () => {
+		const signed: EventTemplate[] = [];
+		const sign = async (template: EventTemplate) => (signed.push(template), { ...template, id: 'i', pubkey: 'p', sig: 's' } as Event);
+		return { signed, sign };
+	};
+
+	it('cover a batch of 20 files once, until a minute before they expire', async () => {
+		let now = NOW;
+		const { signed, sign } = signing();
+		const auth = batchedAuth(entries, sign, 'Publish Lamps', () => now);
+		await Promise.all(entries.map((entry) => auth.batched(entry)));
+		expect(signed.map((t) => t.tags.filter((tag) => tag[0] === 'x').length)).toEqual([20, 20, 5]);
+		expect(signed[0]).toEqual({ kind: 24242, created_at: NOW, content: 'Publish Lamps', tags: [['t', 'upload'], ['expiration', String(NOW + 600)], ...entries.slice(0, 20).map((e) => ['x', e.sha256])] });
+		now += 539;
+		await auth.batched(entries[0]);
+		expect(signed).toHaveLength(3);
+		now += 1;
+		expect((await auth.batched(entries[19])).created_at).toBe(NOW + 540);
+		expect(signed).toHaveLength(4);
+	});
+
+	it('and one for a single file, signed when it is asked for, for five minutes', async () => {
+		const { signed, sign } = signing();
+		const auth = batchedAuth(entries, sign, 'Publish Lamps', () => NOW);
+		await auth.fresh(entries[30]);
+		expect(signed).toEqual([{ kind: 24242, created_at: NOW, content: 'Publish Lamps', tags: [['t', 'upload'], ['expiration', String(NOW + 300)], ['x', entries[30].sha256]] }]);
 	});
 });

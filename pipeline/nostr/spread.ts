@@ -5,11 +5,12 @@
 // another size is downloaded and hashed. A server that refuses a type, or one file, goes without it and is reported;
 // the run fails only when the site's own server lacks a file or a file reaches fewer public servers than asked for.
 //
-// Uploads are authorised by kind 24242 events. One covers a batch of files on every server, so a run signs a handful;
-// some servers refuse one signed more than about two minutes before the transfer (nostr.download and nsite.run did in
-// October 2026), and such a server gets one signed just before each transfer from then on.
-import type { Event } from 'nostr-tools/core';
+// Uploads are authorised by kind 24242 events. One covers a batch of files on every server, so a run signs a handful.
+// A server that refuses it gets one signed just before each transfer from then on. In October 2026 nostr.download and
+// nsite.run refused one signed more than about two minutes before the transfer, and cdn.klepak.net one it had seen.
+import type { Event, EventTemplate } from 'nostr-tools/core';
 import { blobUrl, extOf, head, mirror, preflight, upload, verify, type Result } from './blossom.ts';
+import { KIND } from './config.ts';
 import type { FileEntry } from './manifest.ts';
 
 export type Authorise = {
@@ -42,12 +43,54 @@ export type Spread = {
 	refused: Map<string, string[]>;
 };
 
+const BATCH = 20;
+const EXPIRY = 600;
+
+/**
+ * The authorisations a publish signs for `entries`. One covers a batch of 20 hashes on every server, so a run signs a
+ * handful of tokens, not hundreds. The token is scoped by the file hashes and a short expiry only. BUD-11's optional
+ * `server` tags are read differently by the servers out there (hzrd149's blossom-server wants the bare domain,
+ * blssm.us and nsite.run reject anything but a URL), and a hash-scoped token replayed elsewhere can only place the
+ * same public bytes. A batch's token is signed again a minute before it expires, and the servers of one file, served
+ * at once, all wait for the same pending signature; a server that wants a token minted just before the transfer gets
+ * one of its own each time (`fresh`).
+ */
+export function batchedAuth(entries: FileEntry[], sign: (template: EventTemplate) => Promise<Event>, content: string, now = () => Math.floor(Date.now() / 1000)): Authorise {
+	const batches = new Map<string, FileEntry[]>();
+	for (let i = 0; i < entries.length; i += BATCH) {
+		const batch = entries.slice(i, i + BATCH);
+		for (const entry of batch) batches.set(entry.sha256, batch);
+	}
+	const authorisation = (hashes: string[], lifetime = EXPIRY) => {
+		const signed = now();
+		return sign({ kind: KIND.blobAuth, created_at: signed, content, tags: [['t', 'upload'], ['expiration', String(signed + lifetime)], ...hashes.map((sha256) => ['x', sha256])] });
+	};
+	const pending = new Map<FileEntry[], { signed: number; auth: Promise<Event> }>();
+	return {
+		batched(entry) {
+			const batch = batches.get(entry.sha256)!;
+			const cached = pending.get(batch);
+			if (cached && now() - cached.signed < EXPIRY - 60) return cached.auth;
+			const signed = now();
+			const auth = authorisation(batch.map((e) => e.sha256));
+			pending.set(batch, { signed, auth });
+			return auth;
+		},
+		fresh: (entry) => authorisation([entry.sha256], 300)
+	};
+}
+
 /** Why a spread cannot give the site what it needs. */
 export class SpreadError extends Error {}
 
 const pair = (server: string, entry: { sha256: string }) => `${server} ${entry.sha256}`;
-/** An authorised call a server refused for its authorisation, not for the file. */
-const unauthorised = (r: Result) => r.status === 401 || r.status === 403;
+/**
+ * An authorised call a server may have refused for its authorisation rather than the file. Some say so with a 400,
+ * each in its own words: in October 2026 nostr.download answered "Created timestamp is out of range", cdn.klepak.net
+ * "Auth event already used" and files.sovbit.host "Invalid base64 in Authorization header". A 400 can be about the
+ * file too, so the fresh authorisation it earns costs one signature and marks the server only when it works.
+ */
+const unauthorised = (r: Result) => r.status === 400 || r.status === 401 || r.status === 403;
 
 export async function spread(options: SpreadOptions): Promise<Spread> {
 	const { servers, entries, minPublic, auth } = options;
@@ -63,7 +106,7 @@ export async function spread(options: SpreadOptions): Promise<Spread> {
 		const again = await send(await auth.fresh(entry));
 		if (again.ok && !strict.has(server)) {
 			strict.add(server);
-			log(`  ${server} refused an authorisation signed earlier; it gets one signed just before each transfer`);
+			log(`  ${server} refused the batch's authorisation; it gets one signed just before each transfer`);
 		}
 		return again;
 	}
@@ -77,6 +120,9 @@ export async function spread(options: SpreadOptions): Promise<Spread> {
 			const refusals: string[] = [];
 			let unknown = false;
 			for (const probe of probes) {
+				// A server that holds the probe takes its type. Asked anyway, some answer with a 400 (24242.io and
+				// nostr.media: "already got that file", October 2026).
+				if ((await head(server, probe.sha256)).status === 200) continue;
 				const r = await authorised(server, probe, (event) => preflight(server, probe, event));
 				if (r.ok) {
 					unknown ||= r.reason === 'no preflight endpoint';

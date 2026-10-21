@@ -21,7 +21,8 @@ describe('sitePaths', () => {
 			catalogue: '/srv/site/catalogue.json',
 			catalogueFiles: '/srv/site/catalogue-files',
 			build: '/srv/site/build',
-			napplet: '/srv/site/dist-napplet'
+			napplet: '/srv/site/dist-napplet',
+			verified: '/srv/site/.cache/verified-copies.json'
 		});
 		expect(sitePaths('..').dir).toBe(join(process.cwd(), '..'));
 	});

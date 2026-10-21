@@ -60,7 +60,10 @@ for another site from the same checkout: they read `<dir>/.nsite/config.json` an
 A site can list its own models in `<dir>/catalogue.json` (`src/lib/catalogue/catalogue.ts`): each model's versions,
 their STEP files and the conversions published for them. The web page fetches it as it starts; the napplet carries it.
 The publisher spreads the files the catalogue names from `<dir>/catalogue-files/<sha256>` with the site's own, to
-every configured Blossom server that takes their type.
+every configured Blossom server that takes their type. `--files-only` uploads those files alone and publishes nothing,
+so a new version's files can be on the servers before the catalogue that names them. It records the copies it checked
+in `<dir>/.cache/verified-copies.json`, so the next publish does not download them again; keep that directory out of
+git.
 
 ## Opening files
 

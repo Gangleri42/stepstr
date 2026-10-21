@@ -29,8 +29,8 @@ vite.*.config.ts.timestamp-*
 __pycache__
 *.pyc
 
-# Local caches, the test files among them (scripts/fixtures.mjs)
-/.cache
+# Local caches, the test files among them (scripts/fixtures.mjs), and a site's record of verified copies
+.cache/
 
 # Browser test output
 /test-results

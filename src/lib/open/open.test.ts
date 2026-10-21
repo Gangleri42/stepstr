@@ -7,7 +7,7 @@ import type { KeptModel, RecentEntry, RecentStore } from '$lib/recent/types';
 import { explainLoadError } from '$lib/source/load';
 import { localFile } from '$lib/source/local';
 import { sha256Hex } from '$lib/source/sha256';
-import type { Source } from '$lib/state/hash';
+import type { FileSource } from '$lib/state/hash';
 import { NO_JIT, opener, QUICK_LOOKUP, SLOW_LOOKUP, type Stage } from './open';
 
 // Kept models are matched to the conversion that made them; the build's own id depends on the converter being there.
@@ -19,7 +19,7 @@ vi.mock('$lib/convert/jit', () => ({ jitOff: () => jit.off }));
 const utf8 = (text: string) => new TextEncoder().encode(text);
 const step = (label: string) => utf8(`ISO-10303-21;\n/* ${label} */\nEND-ISO-10303-21;\n`);
 const at = (name: string) => `https://files.example/${name}`;
-const linkTo = (name: string, sha256?: string): Source => ({ kind: 'url', url: at(name), ...(sha256 ? { sha256 } : {}) });
+const linkTo = (name: string, sha256?: string): FileSource => ({ kind: 'url', url: at(name), ...(sha256 ? { sha256 } : {}) });
 
 const modelOf = (bytes: Uint8Array): Converted => ({
 	glb: bytes,
@@ -70,7 +70,7 @@ function fakeHost(fakes: Fakes = {}) {
 }
 
 /** A load as the app starts it, and the stages it reported. */
-function start(open: ReturnType<typeof opener>, host: Host, source: Source, name: string | null = null) {
+function start(open: ReturnType<typeof opener>, host: Host, source: FileSource, name: string | null = null) {
 	const controller = new AbortController();
 	const stages: Stage[] = [];
 	const opened = open(host, source, name, (stage) => stages.push(stage), controller.signal);

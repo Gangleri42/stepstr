@@ -44,7 +44,7 @@ export function createWebHost(servers: string[], catalogue?: Catalogue): Host {
 		shareLinks(route): ShareLink[] {
 			return [
 				{ id: 'web', label: 'Copy link', hint: 'opens this view here', text: `${location.origin}${location.pathname}${route}` },
-				{ id: 'intent', label: 'Copy intent', hint: 'opens it in a napplet shell', text: conventionUri(route) }
+				{ id: 'intent', label: 'Copy intent', hint: 'opens it in a napplet shell', text: conventionUri(route, catalogue) }
 			];
 		},
 		copy: copyText,

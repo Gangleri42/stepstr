@@ -2,7 +2,7 @@
 // the frame exists, so this subscribes at module load, before the UI or three.js are in, and keeps the last route for
 // whoever mounts later. A host that already holds the file's bytes may hand them over as `data`.
 import { addLocalFile } from '$lib/source/local';
-import { decode, encode } from '$lib/state/hash';
+import { decode, encode, type RouteCatalogue } from '$lib/state/hash';
 import { OPEN_TOPICS, READY_TOPIC, routeFromPayload } from '$lib/state/route';
 import { close, has, type Handle, type IncEvent } from './napplet-runtime';
 
@@ -11,6 +11,7 @@ let opened = false;
 /** Deliveries apply in the order they came: one that carries bytes takes longer to read than one with a link. */
 let queue: Promise<void> = Promise.resolve();
 let fallbackServers: string[] = [];
+let siteCatalogue: RouteCatalogue | null = null;
 const listeners = new Set<(route: string) => void>();
 const handles: Handle[] = [];
 
@@ -28,14 +29,14 @@ async function bytesOf(data: unknown): Promise<Uint8Array | null> {
 }
 
 async function deliver(payload: unknown) {
-	let route = routeFromPayload(payload, fallbackServers);
+	let route = routeFromPayload(payload, fallbackServers, siteCatalogue);
 	const p = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : null;
 	const bytes = p ? await bytesOf(p.data) : null;
 	if (p && bytes) {
 		// The bytes are the file: keep them, and point the route at them by hash.
 		const name = typeof p.name === 'string' && p.name.trim() ? p.name.trim() : 'model.step';
 		const sha256 = addLocalFile(name, bytes);
-		const view = route ? decode(route) : decode(typeof p.view === 'string' ? `#/?${p.view}` : '#/');
+		const view = route ? decode(route, siteCatalogue) : decode(typeof p.view === 'string' ? `#/?${p.view}` : '#/');
 		route = encode({ ...view, source: { kind: 'blob', sha256, servers: view.source?.kind === 'blob' ? view.source.servers : [] }, name });
 	}
 	if (!route) return;
@@ -47,10 +48,11 @@ function enqueue(payload: unknown) {
 	queue = queue.then(() => deliver(payload)).catch(() => undefined);
 }
 
-export function openInbox(servers: string[]) {
+export function openInbox(servers: string[], catalogue: RouteCatalogue | null = null) {
 	if (opened) return;
 	opened = true;
 	fallbackServers = servers;
+	siteCatalogue = catalogue;
 	const inc = has('inc', 'on', 'emit');
 	if (inc) {
 		for (const topic of OPEN_TOPICS) {

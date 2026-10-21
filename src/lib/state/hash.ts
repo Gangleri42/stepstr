@@ -3,17 +3,32 @@
 //   #/u?src=<https url>&x=<sha256>&iso=c7        a file at a URL, pinned to its bytes by x
 //   #/n/<nevent1…>?x=<sha256>                     a file a Nostr event points at
 //   #/                                            nothing open yet
+// A site with a catalogue (src/lib/catalogue) names its own models after those heads, and opens its home model on an
+// empty route:
+//   #/lamp@aaaaaaa?b=1111111&hide=a3             a model at a version, with a companion revision (or b=cad)
+//   #/lamp                                        its latest version
 // Unknown keys are ignored, so old links survive new features.
 
 export type Axis = 'x' | 'y' | 'z';
 export type Cut = { axis: Axis; offset: number; flip: boolean };
 export type Camera = { position: [number, number, number]; target: [number, number, number]; zoom?: number };
 
-/** Where the file comes from. A Blossom blob is named by its hash; the others are pinned to their bytes by `sha256`. */
+/**
+ * Where the file comes from. A Blossom blob is named by its hash; the others are pinned to their bytes by `sha256`. A
+ * catalogue model is pinned by its version, which the catalogue ties to a STEP file's hash: a version, as written in
+ * the link (a commit id, or more of the commit), and a companion, `cad` or a revision.
+ */
 export type Source =
 	| { kind: 'blob'; sha256: string; ext?: string; servers: string[]; size?: number; author?: string }
 	| { kind: 'url'; url: string; sha256?: string }
-	| { kind: 'nostr'; pointer: string; sha256?: string };
+	| { kind: 'nostr'; pointer: string; sha256?: string }
+	| { kind: 'catalogue'; model: string; version?: string; companion?: string };
+
+/** A source that names a file itself; a catalogue model becomes one once the catalogue says which file it is. */
+export type FileSource = Exclude<Source, { kind: 'catalogue' }>;
+
+/** What a route needs of a site's catalogue: the models it names, and the one an empty route opens. */
+export type RouteCatalogue = { home: string; models: Record<string, unknown> };
 
 /**
  * One measured item: a face (f), edge (e) or vertex (v) of a body, or the centre (c) or midpoint (m) of an edge, by
@@ -64,7 +79,8 @@ export function defaultState(source: Source | null = null): ViewState {
 }
 
 /** Whether the source names exact bytes, so measured items and part ids in a link keep their meaning. */
-export const pinned = (source: Source | null) => !!source && (source.kind === 'blob' || !!source.sha256);
+export const pinned = (source: Source | null) =>
+	!!source && (source.kind === 'blob' || (source.kind === 'catalogue' ? !!source.version : !!source.sha256));
 
 /** A stable key for a source: two routes with the same key show the same file. */
 export function sourceKey(source: Source): string;
@@ -78,6 +94,8 @@ export function sourceKey(source: Source | null): string | null {
 			return source.sha256 ? `sha256:${source.sha256}` : `url:${source.url}`;
 		case 'nostr':
 			return source.sha256 ? `sha256:${source.sha256}` : `nostr:${source.pointer}`;
+		case 'catalogue':
+			return `catalogue:${source.model}${source.version ? `@${source.version}` : ''}${source.companion ? `?b=${source.companion}` : ''}`;
 	}
 }
 
@@ -99,6 +117,7 @@ const num = (v: number, step = 0.1) => String(Number(round(v, step).toFixed(3)))
 const ID_LIST = /^[0-9a-z]+(,[0-9a-z]+)*$/;
 const HEX64 = /^[0-9a-f]{64}$/;
 const HEX64_KEY = /^[0-9a-f]{64}$/i;
+const COMPANION = /^(cad|[0-9a-f]{7})$/;
 
 /** Percent-encodes everything but letters, digits and "-_.", so values never collide with the grammar's own signs. */
 const component = (text: string) => encodeURIComponent(text).replace(/[!'()*~]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
@@ -119,8 +138,12 @@ export function encode(state: ViewState): string {
 	} else if (source?.kind === 'nostr') {
 		head = `#/n/${source.pointer}`;
 		if (source.sha256) params.push(`x=${source.sha256}`);
+	} else if (source?.kind === 'catalogue') {
+		head = `#/${source.model}${source.version ? `@${source.version}` : ''}`;
+		if (source.companion) params.push(`b=${source.companion}`);
 	}
-	if (state.name) params.push(`name=${component(state.name)}`);
+	// A catalogue names its models itself.
+	if (state.name && source?.kind !== 'catalogue') params.push(`name=${component(state.name)}`);
 	if (state.hidden.length) params.push(`hide=${state.hidden.join(',')}`);
 	if (state.isolated.length) params.push(`iso=${state.isolated.join(',')}`);
 	if (state.cuts.length) {
@@ -147,13 +170,26 @@ function triple(text: string | undefined): [number, number, number] | null {
 // NIP-19 bech32: the entities that can point at an event carrying a file.
 const POINTER = /^(?:note|nevent|naddr)1[02-9ac-hj-np-z]{6,}$/;
 const ROUTE = /^#\/(?:b\/([0-9a-f]{64})(?:\.([a-z0-9]{1,8}))?|(u)|n\/([0-9a-z]+))?(?:\?(.*))?$/i;
+// Any version is kept as written, in lowercase: one the catalogue does not list opens the latest, and says so.
+const MODEL_ROUTE = /^#\/([a-z0-9-]+)(?:@([0-9a-z]{1,40}))?(?:\?(.*))?$/i;
 const QUERY = /^[\w.,:;!=&%-]*$/;
 
-/** Whether the text has the shape of a route: a source head and a query made of the grammar's characters. */
-export function isRoute(hash: string) {
+/** A route that names a model the catalogue lists: the model, the version as written and the query. */
+function modelRoute(hash: string, catalogue: RouteCatalogue | null | undefined) {
+	const match = catalogue ? MODEL_ROUTE.exec(hash) : null;
+	if (!catalogue || !match || !Object.hasOwn(catalogue.models, match[1].toLowerCase())) return null;
+	return { model: match[1].toLowerCase(), version: match[2]?.toLowerCase(), query: match[3] };
+}
+
+/**
+ * Whether the text has the shape of a route: a source head and a query made of the grammar's characters. With a
+ * catalogue, a model it lists is a head too.
+ */
+export function isRoute(hash: string, catalogue?: RouteCatalogue | null) {
 	const match = ROUTE.exec(hash);
-	if (!match || (match[4] && !POINTER.test(match[4].toLowerCase()))) return false;
-	return match[5] === undefined || QUERY.test(match[5]);
+	if (match) return (!match[4] || POINTER.test(match[4].toLowerCase())) && (match[5] === undefined || QUERY.test(match[5]));
+	const named = modelRoute(hash, catalogue);
+	return !!named && (named.query === undefined || QUERY.test(named.query));
 }
 
 /** An https URL, or null: the only scheme a `u` route may point at. */
@@ -167,11 +203,22 @@ function httpsUrl(text: string | null) {
 	}
 }
 
-/** The view a route describes. Values that do not parse are dropped one by one, so a hand-edited link keeps the rest. */
-export function decode(hash: string): ViewState {
+/**
+ * The view a route describes. Values that do not parse are dropped one by one, so a hand-edited link keeps the rest.
+ * With a catalogue, a route stepstr's heads do not take may name one of its models, and a route that names no file,
+ * or nothing that parses, opens its home model.
+ */
+export function decode(hash: string, catalogue?: RouteCatalogue | null): ViewState {
 	const match = ROUTE.exec(hash);
-	if (!match) return defaultState();
+	const home = catalogue ? { kind: 'catalogue' as const, model: catalogue.home } : null;
+	if (!match) {
+		const named = modelRoute(hash, catalogue);
+		if (!named) return defaultState(home);
+		const params = new URLSearchParams(named.query ?? '');
+		return view(params, catalogueSource(named.model, named.version, params));
+	}
 	const params = new URLSearchParams(match[5] ?? '');
+	if (home && !match[1] && !match[3] && !match[4]) return view(params, catalogueSource(home.model, undefined, params));
 	const x = params.get('x');
 	const pin = x && HEX64_KEY.test(x) ? { sha256: x.toLowerCase() } : {};
 	let source: Source | null = null;
@@ -189,9 +236,19 @@ export function decode(hash: string): ViewState {
 	} else if (match[4] && POINTER.test(match[4].toLowerCase())) {
 		source = { kind: 'nostr', pointer: match[4].toLowerCase(), ...pin };
 	}
+	return view(params, source);
+}
+
+function catalogueSource(model: string, version: string | undefined, params: URLSearchParams): Source {
+	const companion = params.get('b');
+	return { kind: 'catalogue', model, ...(version ? { version } : {}), ...(companion && COMPANION.test(companion) ? { companion } : {}) };
+}
+
+/** The view around a source: how a route's query says it is shown. */
+function view(params: URLSearchParams, source: Source | null): ViewState {
 	const state = defaultState(source);
 	const name = params.get('name')?.trim();
-	if (name) state.name = name.slice(0, 200);
+	if (name && source?.kind !== 'catalogue') state.name = name.slice(0, 200);
 
 	const ids = (key: string) => {
 		const value = params.get(key);

@@ -2,6 +2,7 @@
 	import { onMount, untrack } from 'svelte';
 	import mark from '../../brand/icon.svg?raw';
 	import { ABOUT } from '$lib/about';
+	import { resolveModel, type Resolved } from '$lib/catalogue/versions';
 	import type { Converted } from '$lib/convert/types';
 	import type { Host, ShareLink } from '$lib/host/host';
 	import type { MeasureData } from '$lib/measure/format';
@@ -10,7 +11,7 @@
 	import { explainLoadError } from '$lib/source/load';
 	import { addLocalFile, localFile } from '$lib/source/local';
 	import type { RecentEntry } from '$lib/recent/types';
-	import { decode, defaultState, encode, sameRef, sourceKey, UP_AXES, type Axis, type MeasureRef, type Source, type UpAxis, type ViewState } from '$lib/state/hash';
+	import { decode, defaultState, encode, sameRef, sourceKey, UP_AXES, type Axis, type FileSource, type MeasureRef, type Source, type UpAxis, type ViewState } from '$lib/state/hash';
 	import { theme } from '$lib/theme.svelte';
 	import MeasurePanel from '$lib/ui/MeasurePanel.svelte';
 	import OpenPanel from '$lib/ui/OpenPanel.svelte';
@@ -23,6 +24,8 @@
 	import { title } from 'virtual:stepstr-site';
 
 	let { host }: { host: Host } = $props();
+	// The site's catalogue, if it has one, is there from the start and stays.
+	const catalogue = untrack(() => host.catalogue ?? null);
 
 	type Model = { name: string; unit: string; download: string | null; local: boolean; triangles: number; warnings: string[] };
 
@@ -74,6 +77,33 @@
 	});
 	const showOpen = $derived(openShown || (!view.source && !stage));
 
+	/** The file a source names: a catalogue model's is the STEP file of the version the catalogue resolves it to. */
+	function fileOf(source: Source | null): { file: FileSource; listed?: Resolved } | null {
+		if (source?.kind !== 'catalogue') return source && { file: source };
+		const listed = catalogue && resolveModel(catalogue, source);
+		return listed ? { file: listed.file, listed } : null;
+	}
+	/** The key of the file a source names: two sources with one key show the same file, and its recent entry has it. */
+	const keyOf = (source: Source | null) => {
+		const found = fileOf(source);
+		return found && sourceKey(found.file);
+	};
+	/** What a link to a version the catalogue does not list is told: it shows other bytes than it named. */
+	const gone = ({ model, missing }: Resolved) => `The catalogue lists no version ${missing} of ${model.title}, so the latest opened.`;
+	/**
+	 * A route to the model on screen names its version as shown, whichever version or none it named; a version the
+	 * catalogue does not list is said, and its measured items go.
+	 */
+	function pinShown(next: ViewState) {
+		const listed = fileOf(next.source)?.listed;
+		if (next.source?.kind !== 'catalogue' || !listed) return;
+		if (listed.missing) {
+			notice = gone(listed);
+			next.measure = [];
+		}
+		next.source = { ...next.source, version: listed.version.id };
+	}
+
 	const CONTEXT_LOST = 'The graphics driver stopped the 3D view. Reload the page; if it stays blank, close the tab and open it again.';
 	let contextLost = $state(false);
 	const NAMED_VIEWS: [NamedView, string][] = [['iso', 'Iso'], ['front', 'Front'], ['top', 'Top'], ['right', 'Right']];
@@ -124,7 +154,7 @@
 		arriving.set(entry.key, ticket);
 		// Let the first frames settle before the snapshot; a file opened meanwhile must not be pictured as this one.
 		await new Promise((resolve) => setTimeout(resolve, 400));
-		const shown = loadedKey === entry.key && sourceKey(view.source) === entry.key;
+		const shown = loadedKey === entry.key && keyOf(view.source) === entry.key;
 		let picture: Blob | null = null;
 		try {
 			picture = shown ? ((await viewer?.snapshot()) ?? null) : null;
@@ -142,7 +172,7 @@
 
 	onMount(() => {
 		const stopTheme = theme.init(host.theme);
-		view = decode(host.initialRoute());
+		view = decode(host.initialRoute(), catalogue);
 		void refreshRecent();
 		const query = matchMedia('(max-width: 760px)');
 		narrow = query.matches;
@@ -180,8 +210,9 @@
 
 		const stopRoutes = host.onRoute((route) => {
 			if (route === encode(view)) return;
-			const next = decode(route);
-			const sameFile = sourceKey(next.source) === loadedKey;
+			const next = decode(route, catalogue);
+			const sameFile = keyOf(next.source) === loadedKey;
+			if (sameFile) pinShown(next);
 			view = next;
 			openShown = false;
 			if (sameFile && next.camera) viewer?.setCamera(next.camera);
@@ -208,23 +239,26 @@
 		const scene = viewer;
 		if (!scene) return;
 		const source = view.source;
-		const key = sourceKey(source);
-		if (!source || !key || key === loadedKey || key === loadingKey) return;
-		untrack(() => load(scene, source, key));
+		const found = fileOf(source);
+		const key = found && sourceKey(found.file);
+		if (!source || !found || !key || key === loadedKey || key === loadingKey) return;
+		untrack(() => load(scene, source, found, key));
 	});
 
-	async function load(scene: Viewer, source: Source, key: string) {
+	async function load(scene: Viewer, source: Source, { file, listed }: { file: FileSource; listed?: Resolved }, key: string) {
 		controller?.abort();
 		const { signal } = (controller = new AbortController());
 		loadingKey = key;
 		failure = null;
 		notice = '';
 		openShown = false;
+		// Measured items name faces of one version's bytes: a link to a version the catalogue does not list loses them.
+		if (listed?.missing) view.measure = [];
 		// Read once and untracked: the camera and the sliders change the view all the time and must not restart the load.
 		const wanted = $state.snapshot(view);
-		stage = { label: `Opening ${wanted.name ?? 'the file'}`, fraction: null };
+		stage = { label: `Opening ${wanted.name ?? listed?.model.title ?? 'the file'}`, fraction: null };
 		try {
-			const { model: converted, file: loaded, kept, seen } = await open(host, source, wanted.name, (next) => (stage = next), signal);
+			const { model: converted, file: loaded, kept, seen } = await open(host, file, wanted.name, (next) => (stage = next), signal);
 			if (signal.aborted) return;
 			stage = { label: 'Preparing the view', fraction: null };
 			const glb = converted.glb;
@@ -234,10 +268,16 @@
 			const index = await scene.loadBuffer(buffer as ArrayBuffer, () => !signal.aborted);
 			if (!index || signal.aborted) return;
 
-			// Pin the route to the bytes it showed, so its part ids and measurements keep their meaning.
-			const shown: Source = source.kind === 'blob' || source.sha256 ? source : { ...source, sha256: loaded.sha256 };
-			// sourceKey is null only for a null source.
-			const shownKey = sourceKey(shown) ?? key;
+			// Pin the route to the bytes it showed, so its part ids and measurements keep their meaning. A catalogue model's
+			// route names the version the catalogue gave, by its id.
+			const shown: Source =
+				source.kind === 'catalogue'
+					? { ...source, version: listed!.version.id }
+					: source.kind === 'blob' || source.sha256
+						? source
+						: { ...source, sha256: loaded.sha256 };
+			// keyOf is null only for a null source.
+			const shownKey = keyOf(shown) ?? key;
 			loadedKey = shownKey;
 			loadingKey = null;
 			loadedSource = { source: shown, name: wanted.name ?? loaded.name };
@@ -259,13 +299,17 @@
 			document.documentElement.dataset.glb = converted.measure.glb;
 
 			const stale = [...wanted.hidden, ...wanted.isolated, ...(wanted.selected ? [wanted.selected] : [])].filter((id) => !index.byId.has(id));
+			// A link to a version the catalogue does not list opened other bytes than it named: that comes first.
+			const said = listed?.missing ? `${gone(listed)} ` : '';
 			if (stale.length) {
-				notice = `${stale.length} part${stale.length > 1 ? 's' : ''} from this link ${stale.length > 1 ? 'are' : 'is'} not in this file.`;
+				notice = `${said}${stale.length} part${stale.length > 1 ? 's' : ''} from this link ${stale.length > 1 ? 'are' : 'is'} not in this file.`;
 				view.hidden = view.hidden.filter((id) => index.byId.has(id));
 				view.isolated = view.isolated.filter((id) => index.byId.has(id));
 				if (view.selected && !index.byId.has(view.selected)) view.selected = null;
 			} else if (converted.unit !== 'mm' && converted.unit) {
-				notice = `The file is in ${converted.unit}; stepstr shows and measures in millimetres.`;
+				notice = `${said}The file is in ${converted.unit}; stepstr shows and measures in millimetres.`;
+			} else if (listed?.missing) {
+				notice = gone(listed);
 			}
 			homeCamera = cameraKey(scene.getCamera());
 			if (wanted.camera) scene.setCamera(wanted.camera);
@@ -317,17 +361,18 @@
 
 	/** Opens a route. A link or a file keeps the edges and projection on screen; a recent file opens as it was left. */
 	function openRoute(route: string, asLeft = false) {
-		const next = decode(route);
-		const sameFile = sourceKey(next.source) === loadedKey;
-		view = asLeft ? next : { ...next, edges: view.edges, ortho: view.ortho };
+		const next = decode(route, catalogue);
+		const sameFile = keyOf(next.source) === loadedKey;
 		failure = null;
 		openShown = false;
 		notice = '';
+		if (sameFile) pinShown(next);
+		view = asLeft ? next : { ...next, edges: view.edges, ortho: view.ortho };
 		// The file on screen stays; its view changes, the camera too.
 		if (sameFile && next.camera) viewer?.setCamera(next.camera);
 	}
 	function openText(text: string) {
-		const parsed = routeFromInput(text, host.servers);
+		const parsed = routeFromInput(text, host.servers, catalogue);
 		if ('error' in parsed) {
 			failure = { message: parsed.error };
 			openShown = true;
@@ -505,7 +550,7 @@
 	$effect(() => {
 		const route = encode(view);
 		const key = loadedKey;
-		if (!key || stage || sourceKey(view.source) !== key) {
+		if (!key || stage || keyOf(view.source) !== key) {
 			saveView();
 			return;
 		}

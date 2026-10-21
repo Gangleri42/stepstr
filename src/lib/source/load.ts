@@ -2,7 +2,7 @@
 // event points at. Bytes a route pins by sha256 are checked; zip and gzip wrappers come off.
 import type { Host, Progress } from '$lib/host/host';
 import { moreTelling, TransportError } from '$lib/host/host';
-import type { Source } from '$lib/state/hash';
+import type { FileSource } from '$lib/state/hash';
 import { blobUrl, extOf } from './blossom';
 import { lfsMediaUrl, lfsPointer } from './github';
 import { localFile } from './local';
@@ -44,7 +44,7 @@ function lastSegment(url: string) {
 const final = (err: unknown) =>
 	(err instanceof DOMException && err.name === 'AbortError') || (err instanceof TransportError && (err.reason === 'too-large' || err.reason === 'unsupported-type'));
 
-export async function loadSource(source: Source, name: string | null, host: Host, onProgress: Progress, signal?: AbortSignal): Promise<Loaded> {
+export async function loadSource(source: FileSource, name: string | null, host: Host, onProgress: Progress, signal?: AbortSignal): Promise<Loaded> {
 	const { transport } = host;
 	const finish = (bytes: Uint8Array, sha256: string, fallbackName: string, download: string | null): Loaded => {
 		const step = unwrapStep(bytes, name ?? fallbackName);

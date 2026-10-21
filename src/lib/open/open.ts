@@ -8,7 +8,7 @@ import type { Host } from '$lib/host/host';
 import type { RecentEntry } from '$lib/recent/types';
 import { loadSource, type Loaded } from '$lib/source/load';
 import { addLocalFile, localFile } from '$lib/source/local';
-import { sourceKey, type Source } from '$lib/state/hash';
+import { sourceKey, type FileSource } from '$lib/state/hash';
 
 /** What the app shows while a file opens; `note` is a line below the label. */
 export type Stage = { label: string; fraction: number | null; note?: string };
@@ -79,7 +79,7 @@ export function opener() {
 		}
 	};
 
-	return async function open(host: Host, source: Source, name: string | null, onStage: (stage: Stage) => void, signal: AbortSignal): Promise<Opened> {
+	return async function open(host: Host, source: FileSource, name: string | null, onStage: (stage: Stage) => void, signal: AbortSignal): Promise<Opened> {
 		const report = (stage: Stage) => {
 			if (!signal.aborted) onStage(stage);
 		};

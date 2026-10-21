@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 import * as nip19 from 'nostr-tools/nip19';
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { fixtureCatalogue } from '$lib/catalogue/fixture';
+import { resolveModel, type CatalogueSource } from '$lib/catalogue/versions';
 import { converterFetcher } from '$lib/convert/converter-source';
 import type { Host, Transport } from '$lib/host/host';
 import { TransportError } from '$lib/host/host';
@@ -80,6 +82,20 @@ describe('a link pinned to a sha256 opens those bytes or nothing', () => {
 		// It names a file by URL only, and the URL now serves other bytes.
 		events.naddr1url = { kind: 1, pubkey: 'p'.repeat(64), content: '', tags: [['imeta', 'url https://files.example/part.step', 'm model/step']] };
 		await expect(loadSource({ kind: 'nostr', pointer: 'naddr1url', sha256: PIN }, null, hostWith(transport), () => {})).rejects.toMatchObject({ reason: 'mismatch' });
+	});
+
+	it("from a site's catalogue: a version opens the STEP file the catalogue names, by its hash", async () => {
+		const catalogue = fixtureCatalogue();
+		catalogue.models.stand.versions[1].step.sha256 = PIN;
+		const named = (route: string) => resolveModel(catalogue, decode(route, catalogue).source as CatalogueSource)!;
+		const { file } = named('#/stand@1111111');
+		expect(file).toEqual({ kind: 'url', url: catalogue.models.stand.versions[1].step.url, sha256: PIN });
+		vi.stubGlobal('fetch', async () => response(OTHER));
+		await expect(loadSource(file, null, hostWith(webTransport()), () => {})).rejects.toMatchObject({ reason: 'mismatch' });
+		vi.stubGlobal('fetch', async () => response(STEP));
+		expect(sha256Hex((await loadSource(file, null, hostWith(webTransport()), () => {})).bytes)).toBe(PIN);
+		// A version the catalogue does not list opens other bytes than the link named, so it is named as missing.
+		expect(named('#/stand@fffffff?m=a.f1')).toMatchObject({ version: { id: 'ccc4444' }, missing: 'fffffff' });
 	});
 
 	it('and an unpinned link is pinned to the bytes it fetched', async () => {
@@ -158,6 +174,14 @@ describe('an intent opens only https, Blossom and Nostr sources', () => {
 			expect(routeFromPayload({ url })).toBeNull();
 		}
 	);
+
+	it('opens a catalogue model only on a site whose catalogue lists it', () => {
+		const catalogue = fixtureCatalogue();
+		expect(routeFromPayload({ model: 'stand', version: '1111111' }, [], catalogue)).toBe('#/stand@1111111');
+		expect(routeFromPayload({ model: 'stand', version: '1111111' })).toBeNull();
+		expect(routeFromPayload({ model: 'anvil' }, [], catalogue)).toBeNull();
+		expect(routeFromPayload({ url: 'http://files.example/part.step' }, [], catalogue)).toBeNull();
+	});
 
 	it('opens https, blossom: and nostr: links', () => {
 		expect(routeFromPayload({ url: 'https://files.example/part.step' })).toMatch(/^#\/u\?src=/);

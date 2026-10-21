@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { fixtureCatalogue } from '$lib/catalogue/fixture';
 import { decode, encode, isRoute } from './hash';
 import { CONVENTION, conventionUri, normalizeRoute, routeFromPayload } from './route';
 
@@ -59,5 +60,66 @@ describe('route', () => {
 		expect(routeFromPayload({})).toBeNull();
 		expect(routeFromPayload(null)).toBeNull();
 		expect(routeFromPayload('#/b/x')).toBeNull();
+	});
+});
+
+describe('route, on a site with a catalogue', () => {
+	// Routes and payloads on a site whose catalogue lists three models.
+	const catalogue = fixtureCatalogue();
+
+	it('recognises the hash grammar and nothing else', () => {
+		expect(isRoute('#/stand', catalogue)).toBe(true);
+		expect(isRoute('#/stand@ccc4444?hide=a3,b0&cut=x:12.5!,z:-3&cam=1,2,3;4,5,6;2&edges=0', catalogue)).toBe(true);
+		expect(isRoute('#/stand@ccc4444?m=k3x9a1.f12.q7,0f2kq7.c40', catalogue)).toBe(true);
+		expect(isRoute('#nonsense', catalogue)).toBe(false);
+		expect(isRoute('#/stand?x=<script>', catalogue)).toBe(false);
+		expect(isRoute('#/stand?a=b#c', catalogue)).toBe(false);
+		expect(isRoute(`#/b/${A}?cut=x:1`, catalogue)).toBe(true);
+	});
+
+	it('normalises with or without the leading hash', () => {
+		expect(normalizeRoute('/stand@ccc4444?cut=x:12.5', catalogue)).toBe('#/stand@ccc4444?cut=x:12.5');
+		expect(normalizeRoute(' #/lamp ', catalogue)).toBe('#/lamp');
+		expect(normalizeRoute('/lamp')).toBeNull();
+		expect(normalizeRoute('javascript:alert(1)', catalogue)).toBeNull();
+		expect(normalizeRoute('//host/path', catalogue)).toBeNull();
+		expect(normalizeRoute('', catalogue)).toBeNull();
+		expect(normalizeRoute(42, catalogue)).toBeNull();
+	});
+
+	it('round-trips through the intent convention, with the model and version as fields of their own', () => {
+		const route = '#/stand@ccc4444?hide=1,2f&cut=x:12.5!';
+		const uri = conventionUri(route, catalogue);
+		expect(uri).toBe(`${CONVENTION}?model=stand&version=ccc4444&route=%2Fstand%40ccc4444%3Fhide%3D1%2C2f%26cut%3Dx%3A12.5%21`);
+		// What a runtime does with the query: percent-decode into a string-only payload.
+		const payload = Object.fromEntries(new URLSearchParams(uri.slice(uri.indexOf('?') + 1)));
+		expect(routeFromPayload(payload, [], catalogue)).toBe(route);
+		expect(encode(decode(routeFromPayload(payload, [], catalogue)!, catalogue))).toBe(route);
+		// Another napplet of the site's role reads the model and version.
+		const { route: _, ...portable } = payload;
+		expect(routeFromPayload(portable, [], catalogue)).toBe('#/stand@ccc4444');
+		expect(conventionUri('#/lamp', catalogue)).toBe(`${CONVENTION}?model=lamp&route=%2Flamp`);
+	});
+
+	it('accepts a payload a runtime forgot to decode', () => {
+		expect(routeFromPayload({ route: '%2Flamp%40aaaaaaa%3Fortho%3D1' }, [], catalogue)).toBe('#/lamp@aaaaaaa?ortho=1');
+	});
+
+	it('falls back to model and version fields', () => {
+		expect(routeFromPayload({ model: 'Lamp', version: 'AAAAAAA' }, [], catalogue)).toBe('#/lamp@aaaaaaa');
+		expect(routeFromPayload({ model: 'lamp', version: 'four' }, [], catalogue)).toBe('#/lamp');
+		expect(routeFromPayload({ model: 'lamp', version: 'aaaaaa' }, [], catalogue)).toBe('#/lamp');
+		expect(routeFromPayload({ model: 'lamp', version: '4' }, [], catalogue)).toBe('#/lamp');
+		expect(routeFromPayload({ model: 'lamp', view: 'cut=x:1&ortho=1' }, [], catalogue)).toBe('#/lamp?cut=x:1&ortho=1');
+		expect(routeFromPayload({ model: 4 }, [], catalogue)).toBeNull();
+		expect(routeFromPayload({ model: 'anvil' }, [], catalogue)).toBeNull();
+		expect(routeFromPayload({}, [], catalogue)).toBeNull();
+		expect(routeFromPayload(null, [], catalogue)).toBeNull();
+		expect(routeFromPayload('#/lamp', [], catalogue)).toBeNull();
+	});
+
+	it("still opens stepstr's own payloads", () => {
+		expect(routeFromPayload({ url: `blossom:sha256:${A}` }, [], catalogue)).toBe(`#/b/${A}`);
+		expect(routeFromPayload({ route: `/b/${A}?ortho=1` }, [], catalogue)).toBe(`#/b/${A}?ortho=1`);
 	});
 });

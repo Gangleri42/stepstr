@@ -12,7 +12,7 @@ import { converter, webOrigin } from 'virtual:stepstr';
 import { catalogue, servers } from 'virtual:stepstr-site';
 
 // Subscribe before anything heavy runs: the shell may deliver the opening intent right away.
-openInbox(servers);
+openInbox(servers, catalogue);
 
 const transport = nappletTransport();
 mount(App, {

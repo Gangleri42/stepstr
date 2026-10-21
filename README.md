@@ -107,6 +107,16 @@ The URL hash encodes the view, so a link reopens it:
 | `ortho` | `1` for orthographic                                                  |
 | `up`    | the file's axis that points up: `y`, `x`, `-z`, `-y` or `-x`; Z if absent |
 
+On a site with a catalogue, a route can name one of its models instead, after stepstr's own heads, and an empty route
+opens the catalogue's home model:
+
+```
+#/lamp@aaaaaaa?b=1111111&hide=a3      a model at a version (its commit id), with a companion
+#/lamp                                the latest version; once it opens, the route names it
+```
+
+`b` is `cad` or a companion revision; `name` is never written, and `m` travels only with a version.
+
 ## As a napplet
 
 stepstr is a NIP-5D napplet (manifest kind 35129, `d=stepstr`) with the `3d-model` archetype: a napplet that displays
@@ -124,6 +134,7 @@ Other napplets and shells open a file with the `napplet:3d-model/open` conventio
 `name`, `view` (view keys in the route grammar, such as `cut=x:1&ortho=1`) and `route` (a full stepstr route, which
 takes precedence over the other fields). A host that already has the file's bytes can pass them as `data` (a Blob).
 The napplet also listens on `3d-model:open` and emits `3d-model:ready`, as stlstr does for its preview napplets.
+A site with a catalogue also takes `model` and `version` (a commit id), on its own convention.
 
 A napplet has no network of its own and asks the shell for every file, the converter included. The page is about
 1.1 MB. The converter is published beside it as `converter.txt` (converter.wasm, gzipped and base64-encoded, 4.4 MB;

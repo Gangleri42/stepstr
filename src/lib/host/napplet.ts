@@ -66,7 +66,7 @@ export function createNappletHost({ converter, servers, webOrigin, transport = n
 		shareLinks(route): ShareLink[] {
 			const links: ShareLink[] = [];
 			if (webOrigin) links.push({ id: 'web', label: 'Copy link', hint: 'the web viewer', text: `${webOrigin}/${route}` });
-			links.push({ id: 'intent', label: 'Copy intent', hint: 'opens this view in a napplet shell', text: conventionUri(route) });
+			links.push({ id: 'intent', label: 'Copy intent', hint: 'opens this view in a napplet shell', text: conventionUri(route, catalogue) });
 			return links;
 		},
 		copy: copyText,

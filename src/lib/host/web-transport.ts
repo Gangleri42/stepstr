@@ -5,9 +5,23 @@ import { sha256Hex } from '$lib/source/sha256';
 import type { Progress, Transport } from './host';
 import { moreTelling, TransportError } from './host';
 
-/** Reads a response body in chunks so the loading bar can follow. */
+/**
+ * The body's size as the reader will count it, when the response says. Content-Length is the size sent, so a body the
+ * server compressed is longer than that (raw.githubusercontent.com gzips text: a 25 MB STEP file travels as 4.6 MB),
+ * and a page on another origin cannot see Content-Encoding unless the server exposes it. The length counts for a body
+ * sent as it is, and for one of a binary type whose encoding is hidden; servers compress text, not binary files.
+ */
+function bodySize(response: Response): number | null {
+	const length = Number(response.headers.get('content-length')) || 0;
+	const encoding = response.headers.get('content-encoding');
+	if (!length || (encoding && encoding !== 'identity')) return null;
+	if (!encoding && response.type === 'cors' && /^text\//i.test(response.headers.get('content-type') ?? '')) return null;
+	return length;
+}
+
+/** Reads a response body in chunks so the loading bar can follow: a fraction where the size is known, else null. */
 async function readWithProgress(response: Response, onProgress?: Progress): Promise<Uint8Array> {
-	const total = Number(response.headers.get('content-length')) || 0;
+	let total = bodySize(response);
 	if (!response.body) return new Uint8Array(await response.arrayBuffer());
 	const reader = response.body.getReader();
 	const chunks: Uint8Array[] = [];
@@ -17,7 +31,9 @@ async function readWithProgress(response: Response, onProgress?: Progress): Prom
 		if (done) break;
 		chunks.push(value);
 		received += value.byteLength;
-		onProgress?.(total ? Math.min(1, received / total) : null);
+		// More than the length: it was not the body's, whatever the headers said.
+		if (total && received > total) total = null;
+		onProgress?.(total ? received / total : null);
 	}
 	const out = new Uint8Array(received);
 	let offset = 0;

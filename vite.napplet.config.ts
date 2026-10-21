@@ -9,6 +9,7 @@ import { svelte, vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 import { defineConfig, type Plugin, type ViteDevServer } from 'vite';
 import { aboutModule } from './pipeline/about.ts';
 import { CONVERTER_FILE, converterText } from './pipeline/converter-file.ts';
+import { meshoptNoWorkers } from './pipeline/meshopt-no-workers.ts';
 import { readConfig } from './pipeline/nostr/config.ts';
 import { siteOrigin } from './pipeline/nostr/nsite.ts';
 import { escapeAttribute, SITE, siteModule } from './pipeline/site.ts';
@@ -128,6 +129,7 @@ export default defineConfig({
 		siteModule(),
 		stepstr(),
 		threeNoNetwork(),
+		meshoptNoWorkers(),
 		svelte({ configFile: false, preprocess: vitePreprocess(), compilerOptions: { runes: true } }),
 		// For its single-file mode, which inlines everything into index.html. The manifest it writes has the shape NIP-5D
 		// replaced on 2026-10-05; pipeline/napplet-manifest.ts writes the current one from the head declarations instead.

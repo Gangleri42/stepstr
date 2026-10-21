@@ -3,9 +3,8 @@
 import { createHash } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
 import type * as THREE from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { MeshoptDecoder } from 'meshoptimizer/decoder';
 import { describe, expect, it } from 'vitest';
+import { gltfLoader } from '../src/lib/viewer/gltf.ts';
 import golden from '../test/golden.json' with { type: 'json' };
 import { fixtureBytes, fixtureFile, FIXTURES } from '../test/fixtures.ts';
 import { CONVERTER, lacking } from '../test/prerequisites.ts';
@@ -16,8 +15,8 @@ const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest(
 const skip = lacking({ ...CONVERTER, path: WASM }, fixtureFile('seed-v15'));
 
 async function parse(glb: Uint8Array) {
-	const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
-	const { scene } = await loader.parseAsync(glb.slice().buffer, '');
+	// The viewer's own loader, which opens compressed and uncompressed GLBs alike.
+	const { scene } = await gltfLoader().parseAsync(glb.slice().buffer, '');
 	// As the viewer has it: the root's glTF scale and turn dropped, so world coordinates are the file's, in mm.
 	const root = scene.children[0];
 	root.position.set(0, 0, 0);

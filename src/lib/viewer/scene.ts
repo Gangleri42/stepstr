@@ -1,10 +1,10 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree, type MeshBVH } from 'three-mesh-bvh';
 import type { Camera, Cut, UpAxis } from '$lib/state/hash';
 import { Explode } from './explode';
+import { gltfLoader } from './gltf';
 import { cameraUp, upVector, viewDirection, type NamedView } from './orientation';
 import { clickedPart, indexParts, isShown, type Part, type PartIndex } from './parts';
 import { Section } from './section';
@@ -121,8 +121,8 @@ export class Viewer {
 	radius = 100;
 	bounds = new THREE.Box3();
 
-	/** Parses the GLB. Public so a page can register decoders the app does not ship, such as meshopt's. */
-	readonly loader = new GLTFLoader();
+	/** Parses the GLB, meshopt-compressed or not. Public so a page can register decoders the app does not ship. */
+	readonly loader = gltfLoader();
 	/**
 	 * Whether a loaded model gets the bounding volume hierarchies that clicks and Measure's pointer pick with. A page
 	 * that only shows a model saves building them; a mesh without one is never picked.

@@ -53,6 +53,10 @@ missing. To make every test run or fail by name:
 STEPSTR_STRICT=1 STEPSTR_SLOW=1 npm test
 ```
 
+Both builds and the publishing tools read `.nsite/config.json` for the site they make. `STEPSTR_SITE=<dir>` makes them
+for another site from the same checkout: they read `<dir>/.nsite/config.json` and write `<dir>/build` and
+`<dir>/dist-napplet`.
+
 ## Opening files
 
 Paste a link, drop a file or choose one. A link can be a GitHub file (page links become raw links; Git LFS files are

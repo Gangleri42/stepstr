@@ -10,6 +10,7 @@ import { download, extOf } from './nostr/blossom.ts';
 import { KIND, LOOKUP_RELAYS, readConfig } from './nostr/config.ts';
 import { tagValues, validate } from './nostr/manifest.ts';
 import { Relays } from './nostr/relays.ts';
+import { SITE } from './site.ts';
 
 function fail(message: string): never {
 	console.error(`error: ${message}`);
@@ -18,7 +19,7 @@ function fail(message: string): never {
 
 const out = process.argv.slice(2).find((a) => !a.startsWith('--'));
 if (!out) fail('usage: tsx pipeline/mirror-nostr.ts <dir> [--unless-served]');
-const config = readConfig();
+const config = readConfig(SITE.config);
 const relays = new Relays();
 // Only events signed by the configured key and matching the filter come back (relays.ts).
 const { event } = await relays.latest([...new Set([...config.relays, ...config.archiveRelays, ...LOOKUP_RELAYS])], { kinds: [KIND.site], authors: [config.pubkey], '#d': [config.id] });
@@ -30,7 +31,7 @@ const index = paths.find((p) => p.path === '/index.html');
 if (!index) fail('the manifest has no /index.html');
 
 if (process.argv.includes('--unless-served')) {
-	if (!config.url) fail('--unless-served needs a url in .nsite/config.json');
+	if (!config.url) fail(`--unless-served needs a url in ${SITE.config}`);
 	const response = await fetch(`${config.url}/index.html`, { signal: AbortSignal.timeout(30_000), cache: 'no-store' }).catch(() => null);
 	const served = response?.ok ? createHash('sha256').update(new Uint8Array(await response.arrayBuffer())).digest('hex') : null;
 	if (served === index.sha256) {

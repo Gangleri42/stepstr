@@ -11,12 +11,13 @@ import { aboutModule } from './pipeline/about.ts';
 import { CONVERTER_FILE, converterText } from './pipeline/converter-file.ts';
 import { readConfig } from './pipeline/nostr/config.ts';
 import { siteOrigin } from './pipeline/nostr/nsite.ts';
+import { SITE } from './pipeline/site.ts';
 import { ARCHETYPE, CONVENTION, INTENT_PARAMS, OPTIONAL, REQUIRES } from './src/lib/state/archetype.ts';
 
 const at = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 const escapeAttribute = (text: string) => text.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-const site = readConfig(at('./.nsite/config.json'));
+const site = readConfig(SITE.config);
 const converterPath = process.env.CONVERTER_WASM ?? at('./converter/dist/converter.wasm');
 
 export { CONVERTER_FILE };
@@ -139,7 +140,7 @@ export default defineConfig({
 		})
 	],
 	build: {
-		outDir: at('./dist-napplet'),
+		outDir: SITE.napplet,
 		emptyOutDir: true,
 		modulePreload: { polyfill: false },
 		sourcemap: false,

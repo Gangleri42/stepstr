@@ -9,10 +9,11 @@ import { describe, expect, it } from 'vitest';
 import { CONVERTER_FILE } from '../pipeline/converter-file.ts';
 import { readConfig } from '../pipeline/nostr/config.ts';
 import { NAPPLET_TEMPLATE } from '../pipeline/nostr/manifest.ts';
+import { SITE } from '../pipeline/site.ts';
 import { ARCHETYPE, CONVENTION, INTENT_PARAMS, OPTIONAL, REQUIRES } from '../src/lib/state/archetype.ts';
 import { CONVERTER, lacking } from '../test/prerequisites.ts';
 
-const dir = 'dist-napplet';
+const dir = SITE.napplet;
 const built = !lacking({ what: 'the napplet build', path: `${dir}/index.html`, how: 'build it with `npm run build:napplet`' });
 // The converter the napplet build takes: CONVERTER_WASM, else converter/dist/converter.wasm.
 const converter = { ...CONVERTER, path: process.env.CONVERTER_WASM ?? 'converter/dist/converter.wasm' };
@@ -67,7 +68,7 @@ describe.skipIf(!built)('napplet artefact', () => {
 	});
 
 	it('declares in its head what the manifest says', () => {
-		const config = readConfig();
+		const config = readConfig(SITE.config);
 		expect(markup).toContain(`<meta name="napplet-id" content="${config.id}"`);
 		expect(markup).toContain(`<meta name="napplet-requires" content="${REQUIRES.join(' ')}"`);
 		expect(manifest.kind).toBe(35129);

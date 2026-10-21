@@ -10,10 +10,11 @@ import { KIND, LOOKUP_RELAYS, readConfig } from './nostr/config.ts';
 import { aggregate, tagValue, tagValues, validate } from './nostr/manifest.ts';
 import { siteOrigin } from './nostr/nsite.ts';
 import { Relays } from './nostr/relays.ts';
+import { SITE } from './site.ts';
 
 const positional = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const full = process.argv.includes('--full');
-const config = readConfig();
+const config = readConfig(SITE.config);
 const who = positional[0] ?? config.pubkey;
 const decoded = who.startsWith('npub1') ? nip19.decode(who) : null;
 if (decoded && decoded.type !== 'npub') throw new Error(`${who} is not an npub`);

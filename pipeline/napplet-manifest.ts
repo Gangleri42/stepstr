@@ -7,8 +7,9 @@ import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { CONVERTER_FILE, converterText } from './converter-file.ts';
 import { readConfig } from './nostr/config.ts';
 import { NAPPLET_TEMPLATE, nappletDeclarations, nappletTemplate, sha256, validate } from './nostr/manifest.ts';
+import { SITE } from './site.ts';
 
-const dir = 'dist-napplet';
+const dir = SITE.napplet;
 
 const text = converterText(process.env.CONVERTER_WASM ?? 'converter/dist/converter.wasm');
 const converter = sha256(text);
@@ -20,8 +21,8 @@ writeFileSync(`${dir}/${CONVERTER_FILE}`, text);
 rmSync(`${dir}/.nip5a-manifest.json`, { force: true });
 
 const declared = nappletDeclarations(html.toString('utf8'));
-const id = readConfig().id;
-if (declared.id !== id) throw new Error(`${dir}/index.html declares the napplet "${declared.id}", .nsite/config.json the site "${id}"`);
+const id = readConfig(SITE.config).id;
+if (declared.id !== id) throw new Error(`${dir}/index.html declares the napplet "${declared.id}", ${SITE.config} the site "${id}"`);
 const template = nappletTemplate({ ...declared, artifact: sha256(html), created_at: 0 });
 validate(template);
 writeFileSync(`${dir}/${NAPPLET_TEMPLATE}`, `${JSON.stringify(template, null, 2)}\n`);

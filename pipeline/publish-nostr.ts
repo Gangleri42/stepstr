@@ -1,5 +1,6 @@
 // Publishes stepstr to Nostr, signed end to end:
-//   1. builds the site (build/) and the napplet (dist-napplet: index.html and the converter.txt it fetches by hash)
+//   1. builds the site (build/) and the napplet (dist-napplet: index.html and the converter.txt it fetches by hash), in
+//      the site's directory (site.ts)
 //   2. checks which Blossom servers take every file type, uploads to the project's server and mirrors to the others,
 //      file by file, the others at once
 //   3. downloads and hashes each file on each server where no earlier publish verified it, where it had to be placed
@@ -28,6 +29,7 @@ import { aggregate, collectFiles, NAPPLET_TEMPLATE, nappletOptions, nappletTempl
 import { siteOrigin, snapshotOrigin } from './nostr/nsite.ts';
 import { Relays, type PublishReport } from './nostr/relays.ts';
 import { openSigner, type Signer } from './nostr/signer.ts';
+import { SITE, STEPSTR_DIR } from './site.ts';
 
 const log = (line = '') => console.log(line);
 function fail(message: string): never {
@@ -69,7 +71,7 @@ const opts = {
 	minPublic
 };
 
-const config = readConfig();
+const config = readConfig(SITE.config);
 const npub = nip19.npubEncode(config.pubkey);
 const ownServer = config.servers[0];
 const ownRelay = config.relays[0];
@@ -79,12 +81,14 @@ const unixNow = () => Math.floor(Date.now() / 1000);
 
 if (!opts.skipBuild) {
 	log('building the site and the napplet');
-	execFileSync('npm', ['run', 'build'], { stdio: 'inherit' });
-	if (!opts.skipNapplet) execFileSync('npm', ['run', 'build:napplet'], { stdio: 'inherit' });
+	// From stepstr's directory, for this site wherever the command started.
+	const build = { stdio: 'inherit', cwd: STEPSTR_DIR, env: { ...process.env, STEPSTR_SITE: SITE.dir } } as const;
+	execFileSync('npm', ['run', 'build'], build);
+	if (!opts.skipNapplet) execFileSync('npm', ['run', 'build:napplet'], build);
 }
-if (!existsSync('build/index.html')) fail('build/index.html is missing; run npm run build');
+if (!existsSync(`${SITE.build}/index.html`)) fail(`${SITE.build}/index.html is missing; run npm run build`);
 
-const site = collectFiles('build');
+const site = collectFiles(SITE.build);
 const relays = new Relays();
 const readRelays = [...new Set([...config.relays, ...config.archiveRelays])];
 
@@ -124,13 +128,13 @@ const previousChunks: { path: string; sha256: string; bytes: number }[] = await 
 })();
 const previous: FileEntry[] = previousChunks.filter((p) => !site.some((s) => s.path === p.path)).map((p) => ({ ...p, type: mimeOf(p.path) }));
 // The napplet: its page, which its manifest names, and the converter the page fetches by hash, a blob of its own.
-const napplet = opts.skipNapplet ? [] : collectFiles('dist-napplet', [`/${NAPPLET_TEMPLATE}`]);
+const napplet = opts.skipNapplet ? [] : collectFiles(SITE.napplet, [`/${NAPPLET_TEMPLATE}`]);
 const page = napplet.find((f) => f.path === '/index.html');
-if (!opts.skipNapplet && !page) fail('dist-napplet has no /index.html; run npm run build:napplet');
+if (!opts.skipNapplet && !page) fail(`${SITE.napplet} has no /index.html; run npm run build:napplet`);
 // What the build declared; the publisher signs it with the servers that hold the files.
-const declared = opts.skipNapplet ? null : nappletOptions(JSON.parse(readFileSync(`dist-napplet/${NAPPLET_TEMPLATE}`, 'utf8')));
+const declared = opts.skipNapplet ? null : nappletOptions(JSON.parse(readFileSync(`${SITE.napplet}/${NAPPLET_TEMPLATE}`, 'utf8')));
 if (declared && declared.id !== config.id) fail(`the napplet was built as "${declared.id}", the site id is "${config.id}"; build it again`);
-if (declared && declared.artifact !== page?.sha256) fail(`dist-napplet/${NAPPLET_TEMPLATE} names another index.html than dist-napplet has; run npm run build:napplet`);
+if (declared && declared.artifact !== page?.sha256) fail(`${SITE.napplet}/${NAPPLET_TEMPLATE} names another index.html than ${SITE.napplet} has; run npm run build:napplet`);
 
 const uploads: FileEntry[] = [...site, ...napplet];
 const everything: FileEntry[] = [...uploads, ...previous];

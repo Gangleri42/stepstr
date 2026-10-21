@@ -4,6 +4,7 @@ import adapter from '@sveltejs/adapter-static';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 import { aboutModule } from './pipeline/about.ts';
+import { SITE, siteModule } from './pipeline/site.ts';
 
 // SvelteKit stamps the build into _app/version.json; the last commit that touched the app, instead of the clock,
 // keeps two builds of the same source byte-identical, which is how the Nostr publisher knows nothing changed.
@@ -20,6 +21,7 @@ export default defineConfig({
 	// The dev server hands the Worker the converter from converter/dist.
 	server: { fs: { allow: ['converter'] } },
 	plugins: [
+		siteModule(),
 		aboutModule(fileURLToPath(new URL('./converter/dist/converter.wasm', import.meta.url))),
 		sveltekit({
 			compilerOptions: {
@@ -27,8 +29,8 @@ export default defineConfig({
 				runes: ({ filename }) =>
 					filename.split(/[/\\]/).includes('node_modules') ? undefined : true
 			},
-			// Single static page; all view state lives in the URL hash.
-			adapter: adapter({ fallback: undefined }),
+			// Single static page; all view state lives in the URL hash. Written into the site's directory (pipeline/site.ts).
+			adapter: adapter({ pages: SITE.build, assets: SITE.build, fallback: undefined }),
 			// Served at the root of the nsite. Set BASE_PATH=/<dir> for a deploy under a sub-path.
 			paths: { base: (process.env.BASE_PATH ?? '') as '' | `/${string}` },
 			// The converter (converter/): its loader, and the wasm module the web build serves next to the page.

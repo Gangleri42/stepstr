@@ -29,8 +29,6 @@ export type SiteConfig = {
 /** The config as read: the lists it may leave out are there. */
 export type Config = SiteConfig & { archiveRelays: string[]; gatewayHostnames: string[] };
 
-const CONFIG_PATH = '.nsite/config.json';
-
 /** Where nsite gateways look up an author's relay and server lists (nsite-gateway LOOKUP_RELAYS defaults). */
 export const LOOKUP_RELAYS = ['wss://purplepag.es', 'wss://user.kindpag.es'];
 
@@ -65,7 +63,7 @@ const MIME: Record<string, string> = {
 
 export const mimeOf = (path: string) => MIME[path.split('.').pop()?.toLowerCase() ?? ''] ?? 'application/octet-stream';
 
-export function readConfig(path = CONFIG_PATH): Config {
+export function readConfig(path: string): Config {
 	const config: SiteConfig = JSON.parse(readFileSync(path, 'utf8'));
 	const problems: string[] = [];
 	if (!isSiteId(config.id)) problems.push(`id "${config.id}" must be ${SITE_ID_RULE}`);

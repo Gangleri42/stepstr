@@ -47,7 +47,7 @@ export class MeasureTool implements CanvasTool {
 	active = false;
 	#viewer: Viewer;
 	#on: { change(refs: MeasureRef[]): void; outcome(outcome: Outcome): void };
-	#data: MeasureData | null = null;
+	#data: MeasureData[] | null = null;
 	#topology: Topology | null = null;
 	#refs: MeasureRef[] = [];
 	#picker: Picker;
@@ -96,8 +96,11 @@ export class MeasureTool implements CanvasTool {
 		this.#viewer.requestRender();
 	}
 
-	/** The loaded model's measurement data, or null while it loads or when there is none. */
-	setModel(data: MeasureData | null) {
+	/**
+	 * The measurement data of each file in the scene, the model's first (Topology), or null while it loads or when there
+	 * is none.
+	 */
+	setModel(data: MeasureData[] | null) {
 		if (data === this.#data) return;
 		this.#data = data;
 		this.#topology = data && this.#viewer.parts ? new Topology(data, this.#viewer.parts) : null;

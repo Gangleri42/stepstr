@@ -59,15 +59,15 @@
 	// Measure: open while the tool is up or while the view holds measured items (a link can bring them).
 	let measureOpen = $state(false);
 	let measureTool = $state.raw<MeasureTool | null>(null);
-	// Measure takes the data of each GLB in the scene; the app loads one.
-	let measureData = $state.raw<{ key: string; data: MeasureData } | null>(null);
+	// Measure takes the data of each GLB in the scene, the model's first.
+	let measureData = $state.raw<{ key: string; data: MeasureData[] } | null>(null);
 	let measureError = $state('');
 	let outcome = $state.raw<Outcome | null>(null);
 	let snapping = $state(true);
 	let precision = $state(2);
 	const measuring = $derived(measureOpen || view.measure.length > 0);
 	const measureStatus = $derived<MeasureStatus>(
-		measureError ? 'error' : !measureData || measureData.key !== loadedKey ? 'loading' : measureData.data.solids.some(Boolean) ? 'ready' : 'unavailable'
+		measureError ? 'error' : !measureData || measureData.key !== loadedKey ? 'loading' : measureData.data.some((file) => file.solids.some(Boolean)) ? 'ready' : 'unavailable'
 	);
 
 	const hidden = $derived(new Set(view.hidden));
@@ -300,7 +300,7 @@
 				triangles: converted.triangles,
 				warnings: converted.warnings
 			};
-			measureData = { key: shownKey, data: converted.measure };
+			measureData = { key: shownKey, data: [converted.measure] };
 			measureError = '';
 			// Which model is on screen, by its GLB's sha256: for tests and bug reports.
 			document.documentElement.dataset.glb = converted.measure.glb;

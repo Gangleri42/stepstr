@@ -35,8 +35,12 @@ export class Topology {
 	#frames = new Map<Part, Frame>();
 	#polylines = new Map<string, THREE.Vector3[]>();
 
+	/**
+	 * `data` holds the measurement data of each file in the scene: the model's first, then any whose bodies were added to
+	 * it, each body naming its own file by `userData.source`.
+	 */
 	constructor(
-		readonly data: MeasureData,
+		readonly data: MeasureData[],
 		readonly parts: PartIndex
 	) {}
 
@@ -52,8 +56,8 @@ export class Topology {
 	}
 
 	solid(body: Part): SolidRecord | null {
-		const { solid } = body.object.userData as { solid?: number };
-		return solid === undefined ? null : (this.data.solids[solid] ?? null);
+		const { solid, source } = body.object.userData as { solid?: number; source?: number };
+		return solid === undefined ? null : (this.data[source ?? 0]?.solids[solid] ?? null);
 	}
 
 	frame(body: Part): Frame {

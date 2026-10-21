@@ -59,6 +59,8 @@ for another site from the same checkout: they read `<dir>/.nsite/config.json` an
 
 A site can list its own models in `<dir>/catalogue.json` (`src/lib/catalogue/catalogue.ts`): each model's versions,
 their STEP files and the conversions published for them. The web page fetches it as it starts; the napplet carries it.
+The publisher spreads the files the catalogue names from `<dir>/catalogue-files/<sha256>` with the site's own, to
+every configured Blossom server that takes their type.
 
 ## Opening files
 

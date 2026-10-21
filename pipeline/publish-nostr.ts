@@ -1,10 +1,10 @@
 // Publishes stepstr to Nostr, signed end to end:
 //   1. builds the site (build/) and the napplet (dist-napplet: index.html and the converter.txt it fetches by hash), in
 //      the site's directory (site.ts)
-//   2. checks which Blossom servers take every file type, uploads to the project's server and mirrors to the others,
-//      file by file, the others at once
-//   3. downloads and hashes each file on each server where no earlier publish verified it, where it had to be placed
-//      again, or where the server reports another size
+//   2. spreads the files, and those the site's catalogue names (catalogue-files/), over the Blossom servers
+//      (nostr/spread.ts): each server takes the types it accepts, from the project's server by mirroring or by upload
+//   3. downloads and hashes each copy where no earlier publish verified it, where it had to be placed again, or where
+//      the server reports another size; every file must reach --min-public servers besides the project's
 //   4. merges and publishes the relay list (10002) and server list (10063)
 //   5. publishes the site manifest (35128) with a snapshot (5128), then the napplet manifest (35129) with its snapshot (5129)
 //   6. fetches everything back from the relays and checks the signatures and the manifests
@@ -21,7 +21,9 @@ import { parseArgs } from 'node:util';
 import type { Event, EventTemplate } from 'nostr-tools/core';
 import * as nip19 from 'nostr-tools/nip19';
 import { verifyEvent } from 'nostr-tools/pure';
-import { blobUrl, download, extOf, head, mirror, preflight, upload, verify } from './nostr/blossom.ts';
+import { parseCatalogue } from '../src/lib/catalogue/catalogue.ts';
+import { download, extOf, head } from './nostr/blossom.ts';
+import { catalogueEntries } from './nostr/catalogue-files.ts';
 import { chunksNeeded } from './nostr/carry.ts';
 import { KIND, LOOKUP_RELAYS, mimeOf, readConfig } from './nostr/config.ts';
 import { mergeRelayList, mergeServerList } from './nostr/lists.ts';
@@ -29,7 +31,8 @@ import { aggregate, collectFiles, NAPPLET_TEMPLATE, nappletOptions, nappletTempl
 import { siteOrigin, snapshotOrigin } from './nostr/nsite.ts';
 import { Relays, type PublishReport } from './nostr/relays.ts';
 import { openSigner, type Signer } from './nostr/signer.ts';
-import { SITE, STEPSTR_DIR } from './site.ts';
+import { holdingAll, siteServers, spread, SpreadError, type Spread } from './nostr/spread.ts';
+import { readCatalogue, SITE, STEPSTR_DIR } from './site.ts';
 
 const log = (line = '') => console.log(line);
 function fail(message: string): never {
@@ -136,14 +139,31 @@ const declared = opts.skipNapplet ? null : nappletOptions(JSON.parse(readFileSyn
 if (declared && declared.id !== config.id) fail(`the napplet was built as "${declared.id}", the site id is "${config.id}"; build it again`);
 if (declared && declared.artifact !== page?.sha256) fail(`${SITE.napplet}/${NAPPLET_TEMPLATE} names another index.html than ${SITE.napplet} has; run npm run build:napplet`);
 
+// The files the site's catalogue names, which no manifest lists: the viewer finds them by hash in catalogue.json.
+const catalogue = (() => {
+	try {
+		return readCatalogue()?.catalogue ?? null;
+	} catch (err) {
+		fail(err instanceof Error ? err.message : String(err));
+	}
+})();
+const catalogued: FileEntry[] = (() => {
+	try {
+		return catalogue ? catalogueEntries(catalogue, SITE.catalogueFiles) : [];
+	} catch (err) {
+		fail(err instanceof Error ? err.message : String(err));
+	}
+})();
+
 const uploads: FileEntry[] = [...site, ...napplet];
-const everything: FileEntry[] = [...uploads, ...previous];
+const everything: FileEntry[] = [...uploads, ...catalogued.filter((c) => !uploads.some((u) => u.sha256 === c.sha256)), ...previous];
 const megabytes = (entries: { bytes: number }[]) => (entries.reduce((n, e) => n + e.bytes, 0) / 1e6).toFixed(2);
 
 log(`\nsite ${config.id} for ${npub}`);
 log(`  ${site.length} files, ${megabytes(site)} MB, aggregate ${aggregate([...site, ...previous]).slice(0, 16)}…`);
 if (previous.length) log(`  keeping ${previous.length} chunk paths of the previous deploy for browsers holding the old index.html`);
 if (page) log(`  napplet ${napplet.map((f) => f.path).join(' ')}, ${megabytes(napplet)} MB, index.html ${page.sha256.slice(0, 16)}…`);
+if (catalogued.length) log(`  catalogue ${catalogued.length} files, ${megabytes(catalogued)} MB`);
 log(`  relays  ${config.relays.join(', ')}`);
 log(`  servers ${config.servers.join(', ')}`);
 
@@ -192,110 +212,41 @@ const shutdown = async () => {
 // One upload authorisation covers a batch of hashes on every server, so a run signs a handful of tokens, not hundreds.
 // The token is scoped by the file hashes and a short expiry only. BUD-11's optional `server` tags are read
 // differently by the servers out there (hzrd149's blossom-server wants the bare domain, blssm.us and nsite.run
-// reject anything but a URL), and a hash-scoped token replayed elsewhere can only place the same public bytes.
-// Some servers also want the token minted within the last two minutes, so a batch is re-signed once its token
-// is 90 seconds old; a long run of uploads through a slow link spans many minutes.
+// reject anything but a URL), and a hash-scoped token replayed elsewhere can only place the same public bytes. A
+// batch's token is signed again a minute before it expires; a server that wants a token minted just before the
+// transfer gets one of its own each time (nostr/spread.ts).
 const batches = new Map<string, FileEntry[]>();
 for (let i = 0; i < everything.length; i += 20) {
 	const batch = everything.slice(i, i + 20);
 	for (const entry of batch) batches.set(entry.sha256, batch);
 }
-// The servers of one file are served at once, so a batch keeps its pending signature and they all wait for that one.
-const auths = new Map<FileEntry[], { signed: number; auth: Promise<Event> }>();
-function authFor(entry: { sha256: string }): Promise<Event> {
-	const batch = batches.get(entry.sha256)!;
-	const cached = auths.get(batch);
-	if (cached && unixNow() - cached.signed < 90) return cached.auth;
+const EXPIRY = 600;
+const authorisation = (hashes: string[], lifetime = EXPIRY) => {
 	const signed = unixNow();
-	const auth = signer.signEvent({
+	return signer.signEvent({
 		kind: KIND.blobAuth,
 		created_at: signed,
-		content: 'Publish stepstr',
-		tags: [['t', 'upload'], ['expiration', String(signed + 600)], ...batch.map((e) => ['x', e.sha256])]
+		content: `Publish ${config.title}`,
+		tags: [['t', 'upload'], ['expiration', String(signed + lifetime)], ...hashes.map((sha256) => ['x', sha256])]
 	});
-	auths.set(batch, { signed, auth });
-	return auth;
-}
-
-// ---- gate: which servers take these files --------------------------------------------------------------------------
-
-log('\nchecking servers (BUD-06 preflight per file type)');
-const largestPerType = [...new Map(uploads.map((e) => [e.type, e])).values()].map((probe) => uploads.filter((e) => e.type === probe.type).sort((a, b) => b.bytes - a.bytes)[0]);
-const servers: string[] = [];
-for (const server of config.servers) {
-	const failures: string[] = [];
-	let unknown = false;
-	for (const probe of largestPerType) {
-		const r = await preflight(server, probe, await authFor(probe));
-		if (!r.ok) failures.push(`${probe.type} ${r.status} ${r.reason}`);
-		else if (r.reason === 'no preflight endpoint') unknown = true;
-	}
-	log(`  ${failures.length ? 'skip' : 'ok  '} ${server}${failures.length ? `: ${failures.join('; ')}` : unknown ? ' (no preflight endpoint; the upload decides)' : ''}`);
-	if (!failures.length) servers.push(server);
-}
-if (!servers.includes(ownServer)) {
-	await shutdown();
-	fail(`${ownServer} (the project's server) refused the preflight; fix it before publishing`);
-}
-if (servers.length - 1 < opts.minPublic) {
-	await shutdown();
-	fail(`only ${servers.length - 1} public servers passed, ${opts.minPublic} needed (--min-public to change)`);
-}
-
-// ---- blobs: upload to the project's server, mirror to the rest, verify everywhere --------------------------------
-
-log('\nplacing files');
-// The bytes to upload: the local file, or for a chunk carried over from the previous deploy, a verified copy
-// from the project's server.
-const bytesOf = async (entry: FileEntry): Promise<Uint8Array | null> =>
-	entry.file ? readFileSync(entry.file) : fromOwnServer(entry.sha256, entry.path);
-// "<server> <sha256>" to download below even when an earlier publish verified it: a copy placed in this run is new on
-// that server, and a server that answers for a file with another size (a parked domain, an error page) is suspect.
-const recheck = new Set<string>();
-const place = async (server: string, entry: FileEntry) => {
-	const found = await head(server, entry.sha256);
-	if (found.status === 200) {
-		if (entry.bytes && found.size !== null && found.size !== entry.bytes) recheck.add(`${server} ${entry.sha256}`);
-		return { ok: true, status: 200, reason: 'present' };
-	}
-	recheck.add(`${server} ${entry.sha256}`);
-	if (server !== ownServer) {
-		const mirrored = await mirror(server, blobUrl(ownServer, entry.sha256, extOf(entry.path)), await authFor(entry));
-		if (mirrored.ok) return mirrored;
-	}
-	const bytes = await bytesOf(entry);
-	if (!bytes) return { ok: false, status: 0, reason: 'previous deploy file is gone from the project\'s server and cannot be re-uploaded' };
-	return upload(server, entry, bytes, await authFor(entry));
 };
-const surviving = new Set(servers);
-const lostPrevious = new Set<string>();
-for (const entry of everything) {
-	const own = await place(ownServer, entry);
-	if (!own.ok) {
-		if (!entry.file) {
-			lostPrevious.add(entry.path);
-			continue;
-		}
-		await shutdown();
-		fail(`${ownServer} did not take ${entry.path}: ${own.status} ${own.reason}`);
-	}
-	// The others mirror from the project's server, so they come after it, all at once.
-	const others = servers.filter((s) => s !== ownServer && surviving.has(s));
-	const placed = await Promise.all(others.map((server) => place(server, entry)));
-	placed.forEach((r, i) => {
-		if (r.ok) return;
-		log(`  ${others[i]} did not take ${entry.path}: ${r.status} ${r.reason}; dropping the server for this deploy`);
-		surviving.delete(others[i]);
-	});
-	log(`  ${entry.path} (${(entry.bytes / 1e3).toFixed(0)} kB) on ${[...surviving].length} servers`);
-}
-const carried = previous.filter((p) => !lostPrevious.has(p.path));
-if (lostPrevious.size) log(`  ${lostPrevious.size} previous chunk paths are no longer on ${ownServer} and are dropped`);
+// The servers of one file are served at once, so a batch keeps its pending signature and they all wait for that one.
+const auths = new Map<FileEntry[], { signed: number; auth: Promise<Event> }>();
+const auth = {
+	batched(entry: { sha256: string }): Promise<Event> {
+		const batch = batches.get(entry.sha256)!;
+		const cached = auths.get(batch);
+		if (cached && unixNow() - cached.signed < EXPIRY - 60) return cached.auth;
+		const signed = unixNow();
+		const pending = authorisation(batch.map((e) => e.sha256));
+		auths.set(batch, { signed, auth: pending });
+		return pending;
+	},
+	fresh: (entry: { sha256: string }) => authorisation([entry.sha256], 300)
+};
 
-log('\nverifying: downloading and hashing each file on each server where no earlier publish did');
-// Everything that must be served (verified below), and the site's own file set (the napplet is its own manifest).
-const finalEntries: FileEntry[] = [...uploads, ...carried];
-const siteEntries: FileEntry[] = [...site, ...carried];
+// ---- blobs: which servers take which types, then to the project's server and from it to the rest, then verified ---
+
 // What the manifests on the relays list was verified on their servers before they went out; finding those files
 // there again while placing, at their size, is enough.
 const verifiedBefore = verifiedPairs([current.site, current.napplet]);
@@ -305,28 +256,47 @@ const publishedPage = current.napplet && tagValue(current.napplet, 'x');
 const pageBytes = publishedPage ? await fromOwnServer(publishedPage, '/index.html') : null;
 const publishedConverter = pageBytes ? /blossom:sha256:([0-9a-f]{64})/.exec(new TextDecoder().decode(pageBytes))?.[1] : undefined;
 if (current.napplet && publishedConverter) for (const server of tagValues(current.napplet, 'server')) verifiedBefore.add(`${server} ${publishedConverter}`);
-const downloaded = new Set<string>();
-for (const server of [...surviving]) {
-	const bad: string[] = [];
-	const unverified = finalEntries.filter((entry) => !verifiedBefore.has(`${server} ${entry.sha256}`) || recheck.has(`${server} ${entry.sha256}`));
-	for (const entry of unverified) {
-		downloaded.add(entry.sha256);
-		const r = await verify(server, entry);
-		if (!r.ok) bad.push(`${entry.path}: ${r.status} ${r.reason}`);
+// Nor the files the published catalogue names. Each copy of them was verified where it was placed or found, on the
+// servers the site manifest lists; a server there that refused a type holds none of it, and is asked again.
+const publishedCatalogue = listed(current.site).get('/catalogue.json');
+const catalogueBytes = publishedCatalogue ? await fromOwnServer(publishedCatalogue, '/catalogue.json') : null;
+if (current.site && catalogueBytes) {
+	try {
+		const before = catalogueEntries(parseCatalogue(JSON.parse(new TextDecoder().decode(catalogueBytes))), '', false);
+		for (const server of tagValues(current.site, 'server')) for (const entry of before) verifiedBefore.add(`${server} ${entry.sha256}`);
+	} catch {
+		// A catalogue that cannot be read lists nothing: every copy is downloaded again.
 	}
-	const counts = `${unverified.length} downloaded, ${finalEntries.length - unverified.length} verified before`;
-	log(`  ${bad.length ? 'FAIL' : 'ok  '} ${server}: ${counts}${bad.length ? `; ${bad.slice(0, 3).join('; ')}` : ''}`);
-	if (bad.length) surviving.delete(server);
 }
-if (!surviving.has(ownServer)) {
+
+log('\nchecking servers (BUD-06 preflight per file type), then placing files');
+let spreadOut: Spread;
+try {
+	spreadOut = await spread({
+		servers: config.servers,
+		entries: everything,
+		verifiedBefore,
+		minPublic: opts.minPublic,
+		// The local file, or for a chunk carried over from the previous deploy, a verified copy from the project's server.
+		bytesOf: async (entry) => (entry.file ? readFileSync(entry.file) : fromOwnServer(entry.sha256, entry.path)),
+		auth,
+		log
+	});
+} catch (err) {
 	await shutdown();
-	fail(`${ownServer} does not serve what it accepted; refusing to publish a manifest that points at it`);
+	fail(err instanceof SpreadError ? err.message : String(err));
 }
-if (surviving.size - 1 < opts.minPublic) {
-	await shutdown();
-	fail(`only ${surviving.size - 1} public servers hold every file, ${opts.minPublic} needed`);
-}
-const serverTags = config.servers.filter((s) => surviving.has(s));
+const lostPrevious = new Set(spreadOut.lost.map((entry) => entry.path));
+const carried = previous.filter((p) => !lostPrevious.has(p.path));
+if (lostPrevious.size) log(`  ${lostPrevious.size} previous chunk paths are no longer on ${ownServer} and are dropped`);
+// Everything that must be served, and the site's own file set (the napplet is its own manifest). A manifest lists the
+// servers that hold every file it names; the site's also vouches for the catalogue's files, which the next publish
+// trusts on those servers.
+const siteEntries: FileEntry[] = [...site, ...carried];
+const serverTags = siteServers(spreadOut, config.servers, siteEntries, catalogued);
+const nappletServers = holdingAll(spreadOut, config.servers, napplet);
+for (const [server, types] of spreadOut.refused) log(`  ${server} holds no ${types.join(', ')}`);
+log(`  the site's files are on ${serverTags.length} servers${declared ? `, the napplet's on ${nappletServers.length}` : ''}`);
 
 // ---- relay and server lists -----------------------------------------------------------------------------------------
 
@@ -398,7 +368,7 @@ const siteResult = await publishManifest(
 let nappletResult: Awaited<ReturnType<typeof publishManifest>> | null = null;
 if (declared) {
 	log('\npublishing the napplet');
-	nappletResult = await publishManifest('napplet', (created_at) => nappletTemplate({ ...declared, servers: serverTags, created_at }), KIND.napplet);
+	nappletResult = await publishManifest('napplet', (created_at) => nappletTemplate({ ...declared, servers: nappletServers, created_at }), KIND.napplet);
 }
 
 // ---- gateway check --------------------------------------------------------------------------------------------------

@@ -19,6 +19,7 @@ describe('sitePaths', () => {
 			dir: '/srv/site',
 			config: '/srv/site/.nsite/config.json',
 			catalogue: '/srv/site/catalogue.json',
+			catalogueFiles: '/srv/site/catalogue-files',
 			build: '/srv/site/build',
 			napplet: '/srv/site/dist-napplet'
 		});

@@ -15,6 +15,8 @@ export type SitePaths = {
 	config: string;
 	/** Its models and their versions (src/lib/catalogue), where it has them. */
 	catalogue: string;
+	/** The files the catalogue names, each by its sha256, as the site's builder leaves them for the publisher. */
+	catalogueFiles: string;
 	/** The web build. */
 	build: string;
 	/** The napplet build: index.html, converter.txt and the manifest template. */
@@ -30,6 +32,7 @@ export function sitePaths(dir: string): SitePaths {
 		dir: at,
 		config: join(at, '.nsite/config.json'),
 		catalogue: join(at, 'catalogue.json'),
+		catalogueFiles: join(at, 'catalogue-files'),
 		build: join(at, 'build'),
 		napplet: join(at, 'dist-napplet')
 	};

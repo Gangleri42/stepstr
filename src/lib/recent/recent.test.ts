@@ -47,6 +47,21 @@ describe('the web store', () => {
 		expect((await keptModel(store, 1, 'c2'))?.glb.byteLength).toBe(80);
 	});
 
+	it('keeps the companion shown with a model, counts it, and drops it with a model kept without one', async () => {
+		const store = indexedDbRecent(new IDBFactory(), 400);
+		const companion = { sha256: 'b'.repeat(64), model: model(150) };
+		await store.remember(entry(1), { conversion: 'c1', model: model(100), with: companion });
+		const kept = await store.model!(entry(1).key, entry(1).sha256, 'c1');
+		expect(kept?.with?.sha256).toBe(companion.sha256);
+		expect(kept?.with?.model.glb.byteLength).toBe(150);
+		expect(kept?.with?.model.measure).toEqual(companion.model.measure);
+		// 100 + 150 bytes of GLB and 42 of measurements each: a second model of that size goes past the budget.
+		await store.remember(entry(2), { conversion: 'c1', model: model(100), with: companion });
+		expect((await store.list()).map((e) => e.kept)).toEqual([true, false]);
+		await store.remember(entry(2, { viewedAt: 2_000_000 }), { conversion: 'c1', model: model(100) });
+		expect(await store.model!(entry(2).key, entry(2).sha256, 'c1')).not.toHaveProperty('with');
+	});
+
 	it('keeps the bytes of a file from this device, and forgets them with it', async () => {
 		const store = indexedDbRecent(new IDBFactory());
 		const bytes = new TextEncoder().encode('ISO-10303-21;');

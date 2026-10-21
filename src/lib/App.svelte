@@ -2,15 +2,14 @@
 	import { onMount, untrack } from 'svelte';
 	import mark from '../../brand/icon.svg?raw';
 	import { ABOUT } from '$lib/about';
-	import { resolveModel, versionLabel, type Resolved } from '$lib/catalogue/versions';
-	import type { Converted } from '$lib/convert/types';
+	import { companionFile, companionParam, resolveModel, versionLabel, type CatalogueSource, type Resolved } from '$lib/catalogue/versions';
 	import type { Host, ShareLink } from '$lib/host/host';
 	import type { MeasureData } from '$lib/measure/format';
 	import { routeFromInput } from '$lib/source/input';
-	import { opener, type Stage } from '$lib/open/open';
+	import { companionStages, opener, type Stage } from '$lib/open/open';
 	import { explainLoadError } from '$lib/source/load';
 	import { addLocalFile, localFile } from '$lib/source/local';
-	import type { RecentEntry } from '$lib/recent/types';
+	import type { KeptCompanion, KeptModel, RecentEntry } from '$lib/recent/types';
 	import { decode, defaultState, encode, sameRef, sourceKey, UP_AXES, type Axis, type FileSource, type MeasureRef, type Source, type UpAxis, type ViewState } from '$lib/state/hash';
 	import { theme } from '$lib/theme.svelte';
 	import MeasurePanel from '$lib/ui/MeasurePanel.svelte';
@@ -20,6 +19,7 @@
 	import type { MeasureStatus, MeasureTool, Outcome } from '$lib/viewer/measure/tool';
 	import type { Part, PartIndex } from '$lib/viewer/parts';
 	import { applyVisibility } from '$lib/viewer/parts';
+	import { COMPANION_SOURCE, fitCompanion } from '$lib/viewer/companion';
 	import { applyFinishes } from '$lib/viewer/finishes';
 	import type { NamedView, RenderOptions, Viewer } from '$lib/viewer/scene';
 	import type { Object3D } from 'three';
@@ -90,22 +90,42 @@
 		const found = fileOf(source);
 		return found && sourceKey(found.file);
 	};
+	/** The key of what a source shows: its file, and the companion revision in the file's slot. Another one loads again. */
+	const loadKeyOf = (source: Source | null) => {
+		const found = fileOf(source);
+		const revision = found?.listed && companionParam(found.listed.companion);
+		return found && `${sourceKey(found.file)}${revision ? ` with ${revision}` : ''}`;
+	};
+	/**
+	 * A catalogue model's route as shown: the version on screen, and the companion revision in its slot, which a route
+	 * pinned to a version must name (it shows the slot as in CAD otherwise).
+	 */
+	function shownSource({ companion: _, ...source }: CatalogueSource, listed: Resolved): Source {
+		const companion = companionParam(listed.companion);
+		return { ...source, version: listed.version.id, ...(companion ? { companion } : {}) };
+	}
 	/** The catalogue model the route names, as the catalogue resolves it, for the picker. */
 	const picked = $derived(view.source?.kind === 'catalogue' ? (fileOf(view.source)?.listed ?? null) : null);
-	/** What a link to a version the catalogue does not list is told: it shows other bytes than it named. */
-	const gone = ({ model, missing }: Resolved) => `The catalogue lists no version ${missing} of ${model.title}, so the latest opened.`;
+	/** What a link to a version or a companion revision the catalogue does not list is told: it shows other bytes. */
+	function lost({ model, version, missing, companion, companionMissing }: Resolved) {
+		const said = missing ? [`The catalogue lists no version ${missing} of ${model.title}, so the latest opened.`] : [];
+		if (companionMissing) {
+			const label = model.companions?.label ?? 'companion';
+			const instead = companion.kind === 'revision' ? `the latest, ${companion.revision.id}, is shown` : `${model.title} ${version.id} shows as in CAD`;
+			said.push(`The catalogue lists no ${label} ${companionMissing}, so ${instead}.`);
+		}
+		return said.join(' ');
+	}
 	/**
-	 * A route to the model on screen names its version as shown, whichever version or none it named; a version the
-	 * catalogue does not list is said, and its measured items go.
+	 * A route to the model on screen names its version and companion as shown, whichever it named; a version or companion
+	 * the catalogue does not list is said, and a missing version's measured items go.
 	 */
 	function pinShown(next: ViewState) {
 		const listed = fileOf(next.source)?.listed;
 		if (next.source?.kind !== 'catalogue' || !listed) return;
-		if (listed.missing) {
-			notice = gone(listed);
-			next.measure = [];
-		}
-		next.source = { ...next.source, version: listed.version.id };
+		if (listed.missing || listed.companionMissing) notice = lost(listed);
+		if (listed.missing) next.measure = [];
+		next.source = shownSource(next.source, listed);
 	}
 
 	const CONTEXT_LOST = 'The graphics driver stopped the 3D view. Reload the page; if it stays blank, close the tab and open it again.';
@@ -128,6 +148,9 @@
 			shadowType: (['pcf', 'basic'] as const).find((t) => t === query.get('stype')) ?? defaults.shadowType
 		};
 	}
+	/** The bytes as an ArrayBuffer of their own, as the GLB parser takes them. */
+	const bufferOf = (bytes: Uint8Array) =>
+		(bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength ? bytes.buffer : bytes.slice().buffer) as ArrayBuffer;
 	let homeCamera = '';
 	const cameraKey = (camera: ViewState['camera']) => encode({ ...defaultState(), camera });
 	/** Reads the list again. Reads can finish out of order: the last one asked for wins. */
@@ -152,13 +175,13 @@
 	 * Adds the file on screen to the recent list with a snapshot and, when given, its converted model. Without a
 	 * snapshot the entry keeps the picture it had.
 	 */
-	async function keepRecent(entry: RecentEntry, model?: Omit<Converted, 'ms'> & { download: string | null }, bytes?: Uint8Array) {
+	async function keepRecent(entry: RecentEntry, model?: KeptModel, bytes?: Uint8Array, companion?: KeptCompanion) {
 		if (!host.recent) return;
 		const ticket = Symbol(entry.key);
 		arriving.set(entry.key, ticket);
 		// Let the first frames settle before the snapshot; a file opened meanwhile must not be pictured as this one.
 		await new Promise((resolve) => setTimeout(resolve, 400));
-		const shown = loadedKey === entry.key && keyOf(view.source) === entry.key;
+		const shown = loadedKey === loadKeyOf(view.source) && keyOf(view.source) === entry.key;
 		let picture: Blob | null = null;
 		try {
 			picture = shown ? ((await viewer?.snapshot()) ?? null) : null;
@@ -170,7 +193,8 @@
 		arriving.delete(entry.key);
 		// Record the latest view, not the opening one; otherwise the list keeps the opening view until the next save.
 		const route = shown ? encode(view) : (lastViews.get(entry.key) ?? entry.route);
-		await host.recent.remember({ ...entry, route, thumbnail }, model && ABOUT.conversion ? { conversion: ABOUT.conversion, model, bytes } : undefined);
+		const kept = model && ABOUT.conversion ? { conversion: ABOUT.conversion, model, ...(bytes ? { bytes } : {}), ...(companion ? { with: companion } : {}) } : undefined;
+		await host.recent.remember({ ...entry, route, thumbnail }, kept);
 		await refreshRecent();
 	}
 
@@ -215,7 +239,7 @@
 		const stopRoutes = host.onRoute((route) => {
 			if (route === encode(view)) return;
 			const next = decode(route, catalogue);
-			const sameFile = keyOf(next.source) === loadedKey;
+			const sameFile = loadKeyOf(next.source) === loadedKey;
 			if (sameFile) pinShown(next);
 			view = next;
 			openShown = false;
@@ -244,7 +268,7 @@
 		if (!scene) return;
 		const source = view.source;
 		const found = fileOf(source);
-		const key = found && sourceKey(found.file);
+		const key = loadKeyOf(source);
 		if (!source || !found || !key || key === loadedKey || key === loadingKey) return;
 		untrack(() => load(scene, source, found, key));
 	});
@@ -261,30 +285,65 @@
 		// Read once and untracked: the camera and the sliders change the view all the time and must not restart the load.
 		const wanted = $state.snapshot(view);
 		stage = { label: `Opening ${wanted.name ?? listed?.model.title ?? 'the file'}`, fraction: null };
+		const onStage = (next: Stage) => (stage = next);
+		let parsed: Object3D | null = null;
+		let fitted = false;
 		try {
-			const { model: converted, file: loaded, kept, seen } = await open(host, file, wanted.name, (next) => (stage = next), signal);
+			const opened = await open(host, file, wanted.name, onStage, signal);
+			const { model: converted, file: loaded, kept, seen } = opened;
+			if (signal.aborted) return;
+			// The companion revision for the model's slot: the one kept with the model, or else opened as a model is, from
+			// its published files or its STEP file. Whatever goes wrong with it, the model shows with its slot as in CAD.
+			const choice = listed?.companion.kind === 'revision' ? listed.companion : null;
+			let companion: { model: KeptModel; fresh: boolean } | null = null;
+			let misfit = '';
+			if (choice && catalogue) {
+				try {
+					if (opened.with?.sha256 === choice.revision.step.sha256) companion = { model: opened.with.model, fresh: false };
+					else {
+						const got = await open(host, companionFile(catalogue, choice.revision), null, companionStages(onStage), signal);
+						companion = { model: { ...got.model, download: got.file.download }, fresh: true };
+					}
+					if (signal.aborted) return;
+					parsed = (await scene.loader.parseAsync(bufferOf(companion.model.glb), '')).scene;
+				} catch (err) {
+					if (signal.aborted) return;
+					misfit = explainLoadError(err).message;
+				}
+			}
 			if (signal.aborted) return;
 			stage = { label: 'Preparing the view', fraction: null };
-			const glb = converted.glb;
-			const buffer = glb.byteOffset === 0 && glb.byteLength === glb.buffer.byteLength ? glb.buffer : glb.slice().buffer;
 			// The up axis the link names, before the model is framed.
 			scene.setUp(wanted.up, false);
-			// The finishes the catalogue gives this version's parts, before the model is set up and shown.
+			// The finishes the catalogue gives this version's parts and the companion's, and the companion in its slot, before
+			// the model is set up and shown.
 			const finishes = listed?.version.finishes;
-			const prepare = finishes?.length ? (root: Object3D) => applyFinishes(root, finishes) : undefined;
-			const index = await scene.loadBuffer(buffer as ArrayBuffer, () => !signal.aborted, prepare);
+			const prepare = (root: Object3D) => {
+				if (finishes?.length) applyFinishes(root, finishes);
+				if (!parsed || !choice) return;
+				try {
+					const own = choice.revision.finishes;
+					if (own?.length) applyFinishes(parsed, own);
+					const { label } = choice.track;
+					fitCompanion(root, parsed, choice.slot, { name: label, component: `${label} ${choice.revision.id}` });
+					fitted = true;
+				} catch (err) {
+					misfit = err instanceof Error ? err.message : String(err);
+				}
+			};
+			const index = await scene.loadBuffer(bufferOf(converted.glb), () => !signal.aborted, prepare);
 			if (!index || signal.aborted) return;
 
 			// Pin the route to the bytes it showed, so its part ids and measurements keep their meaning. A catalogue model's
-			// route names the version the catalogue gave, by its id.
+			// route names the version the catalogue gave, by its id, and the companion revision it asked for, shown or not.
 			const shown: Source =
 				source.kind === 'catalogue'
-					? { ...source, version: listed!.version.id }
+					? shownSource(source, listed!)
 					: source.kind === 'blob' || source.sha256
 						? source
 						: { ...source, sha256: loaded.sha256 };
-			// keyOf is null only for a null source.
-			const shownKey = keyOf(shown) ?? key;
+			// loadKeyOf is null only for a null source.
+			const shownKey = loadKeyOf(shown) ?? key;
 			loadedKey = shownKey;
 			loadingKey = null;
 			loadedSource = { source: shown, name: wanted.name ?? loaded.name };
@@ -300,31 +359,38 @@
 				triangles: converted.triangles,
 				warnings: converted.warnings
 			};
-			measureData = { key: shownKey, data: [converted.measure] };
+			measureData = { key: shownKey, data: companion && fitted ? [converted.measure, companion.model.measure] : [converted.measure] };
 			measureError = '';
-			// Which model is on screen, by its GLB's sha256: for tests and bug reports.
+			// Which model is on screen, and which companion in its slot, by their GLBs' sha256: for tests and bug reports.
 			document.documentElement.dataset.glb = converted.measure.glb;
+			if (companion && fitted) document.documentElement.dataset.companion = companion.model.measure.glb;
+			else delete document.documentElement.dataset.companion;
 
 			const stale = [...wanted.hidden, ...wanted.isolated, ...(wanted.selected ? [wanted.selected] : [])].filter((id) => !index.byId.has(id));
-			// A link to a version the catalogue does not list opened other bytes than it named: that comes first.
-			const said = listed?.missing ? `${gone(listed)} ` : '';
+			// A link to a version or a companion the catalogue does not list opened other bytes than it named: that comes
+			// first.
+			const said = listed && (listed.missing || listed.companionMissing) ? [lost(listed)] : [];
+			if (choice && !fitted) {
+				said.push(`${choice.track.label} ${choice.revision.id} could not be fitted: ${misfit.replace(/\.$/, '')}. This is ${listed!.model.title} as in CAD.`);
+			}
+			// A revision that stands in for the one the link named has other parts: measured items on it would land on them.
+			if (listed?.companionMissing && fitted) view.measure = view.measure.filter((ref) => index.byId.get(ref.part)?.object.userData.source !== COMPANION_SOURCE);
 			if (stale.length) {
-				notice = `${said}${stale.length} part${stale.length > 1 ? 's' : ''} from this link ${stale.length > 1 ? 'are' : 'is'} not in this file.`;
+				said.push(`${stale.length} part${stale.length > 1 ? 's' : ''} from this link ${stale.length > 1 ? 'are' : 'is'} not in this file.`);
 				view.hidden = view.hidden.filter((id) => index.byId.has(id));
 				view.isolated = view.isolated.filter((id) => index.byId.has(id));
 				if (view.selected && !index.byId.has(view.selected)) view.selected = null;
 			} else if (converted.unit !== 'mm' && converted.unit) {
-				notice = `${said}The file is in ${converted.unit}; stepstr shows and measures in millimetres.`;
-			} else if (listed?.missing) {
-				notice = gone(listed);
+				said.push(`The file is in ${converted.unit}; stepstr shows and measures in millimetres.`);
 			}
+			notice = said.join(' ');
 			homeCamera = cameraKey(scene.getCamera());
 			if (wanted.camera) scene.setCamera(wanted.camera);
 			stage = null;
 			if (import.meta.env.DEV && new URLSearchParams(location.search).has('debug')) setTimeout(() => (notice = scene.describe()), 1500);
 			if (!wanted.camera) view.camera = null;
 			const entry: RecentEntry = {
-				key: shownKey,
+				key: keyOf(shown) ?? shownKey,
 				route: encode(view),
 				name: view.name ?? loaded.name,
 				sha256: loaded.sha256,
@@ -334,10 +400,12 @@
 				local,
 				thumbnail: null
 			};
-			// A model that came from the kept store is already there. One just converted is kept, with its bytes when the
-			// file is from this device.
+			// A model that came from the kept store is already there, unless a companion came with it that was not. One just
+			// opened is kept, with its bytes when the file is from this device, and with the companion in its slot.
 			const bytes = local && source.kind === 'blob' ? localFile(source.sha256)?.bytes : undefined;
-			void keepRecent(entry, kept ? undefined : { ...converted, download: loaded.download }, bytes);
+			const shownCompanion = choice && companion && fitted ? { sha256: choice.revision.step.sha256, model: companion.model } : undefined;
+			const keep = !kept || (shownCompanion && companion?.fresh);
+			void keepRecent(entry, keep ? { ...converted, download: loaded.download } : undefined, bytes, shownCompanion);
 		} catch (err) {
 			if (signal.aborted) return;
 			loadingKey = null;
@@ -350,6 +418,9 @@
 				view.source = loadedSource.source;
 				view.name = loadedSource.name;
 			}
+		} finally {
+			// A companion parsed and not fitted never reached the scene.
+			if (parsed && !fitted) scene.release(parsed);
 		}
 	}
 
@@ -369,7 +440,7 @@
 	/** Opens a route. A link or a file keeps the edges and projection on screen; a recent file opens as it was left. */
 	function openRoute(route: string, asLeft = false) {
 		const next = decode(route, catalogue);
-		const sameFile = keyOf(next.source) === loadedKey;
+		const sameFile = loadKeyOf(next.source) === loadedKey;
 		failure = null;
 		openShown = false;
 		notice = '';
@@ -524,7 +595,10 @@
 		const keep = refs.filter((ref) => tool.valid(ref));
 		if (keep.length < refs.length) {
 			const n = refs.length - keep.length;
-			notice = `${n} measured item${n > 1 ? 's' : ''} from this link ${n > 1 ? 'are' : 'is'} not in this file.`;
+			// After what the load said, such as a companion that could not be fitted, which takes its items with it.
+			const said = `${n} measured item${n > 1 ? 's' : ''} from this link ${n > 1 ? 'are' : 'is'} not in this file.`;
+			const before = untrack(() => notice);
+			notice = before ? `${before} ${said}` : said;
 			view.measure = keep;
 		}
 	});
@@ -556,8 +630,8 @@
 	}
 	$effect(() => {
 		const route = encode(view);
-		const key = loadedKey;
-		if (!key || stage || keyOf(view.source) !== key) {
+		const key = keyOf(view.source);
+		if (!key || !loadedKey || stage || loadKeyOf(view.source) !== loadedKey) {
 			saveView();
 			return;
 		}
@@ -610,7 +684,7 @@
 		const next = { ...defaultState({ kind: 'catalogue', model: name }), edges: view.edges, ortho: view.ortho };
 		failure = null;
 		notice = '';
-		if (keyOf(next.source) === loadedKey) pinShown(next);
+		if (loadKeyOf(next.source) === loadedKey) pinShown(next);
 		view = next;
 	}
 	/** Another version of the model on screen; "latest" is the newest the catalogue lists. Measured items stay with theirs. */

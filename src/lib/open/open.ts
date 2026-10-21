@@ -5,8 +5,8 @@ import { ABOUT } from '$lib/about';
 import { jitOff } from '$lib/convert/jit';
 import type { Converted, ConvertProgress } from '$lib/convert/types';
 import type { Host } from '$lib/host/host';
-import type { RecentEntry } from '$lib/recent/types';
-import { lastSegment, loadSource, type Loaded } from '$lib/source/load';
+import type { KeptCompanion, RecentEntry } from '$lib/recent/types';
+import { loadSource, type Loaded } from '$lib/source/load';
 import { addLocalFile, localFile } from '$lib/source/local';
 import { sourceKey, type FileSource } from '$lib/state/hash';
 import { listedStep, openPublished } from './published';
@@ -18,6 +18,14 @@ export type Stage = { label: string; fraction: number | null; note?: string };
 export const NO_JIT = `Heads up: JavaScript JIT is off for this site, so converting takes several times longer. Turning it on in the browser's site settings speeds it up.`;
 /** Said under the download and the conversion of a STEP file whose published conversion could not be had. */
 export const UNPUBLISHED = 'The published model could not be fetched, so the STEP file is converted here.';
+/** Said in its place for a companion: the converter names its parts plainly, not as its site published them. */
+export const COMPANION_UNPUBLISHED = `${UNPUBLISHED} Its parts get the converter's own ids, so links to them may not match.`;
+
+/** A companion's stages, as `onStage` takes them: its fallback said as a companion's. */
+export const companionStages =
+	(onStage: (stage: Stage) => void) =>
+	(stage: Stage): void =>
+		onStage(stage.note ? { ...stage, note: stage.note.replace(UNPUBLISHED, COMPANION_UNPUBLISHED) } : stage);
 
 export type Opened = {
 	/** The converted model, or the one kept on this device. */
@@ -28,6 +36,8 @@ export type Opened = {
 	kept: boolean;
 	/** The file's entry in the recent list, when it has one. */
 	seen: RecentEntry | null;
+	/** The companion kept with a kept model, as it was last shown with it. */
+	with?: KeptCompanion;
 };
 
 /** How long a load waits on the recent list's store: for an entry, and for a kept model or file, which can be large. */
@@ -100,21 +110,20 @@ export function opener() {
 		const seen = kept?.entry ?? found;
 		if (kept && pin) {
 			const file = { name: name ?? kept.entry.name, sha256: pin, size: kept.entry.size, download: kept.model.download };
-			return { model: kept.model, file, kept: true, seen };
+			return { model: kept.model, file, kept: true, seen, ...(kept.with ? { with: kept.with } : {}) };
 		}
 
 		// A STEP file the site's catalogue lists, with the conversion it published for this build's conversion code.
 		const catalogue = host.catalogue;
 		const listed = pin && catalogue ? listedStep(catalogue, pin) : null;
-		const title = name ?? listed?.model.title ?? 'the file';
+		const title = name ?? listed?.title ?? 'the file';
 		let unpublished: string | undefined;
 		if (pin && listed && catalogue && ABOUT.conversion && catalogue.conversion === ABOUT.conversion) {
-			const { step, files } = listed.version;
 			const label = `Downloading ${title}`;
 			report({ label, fraction: null });
 			try {
-				const model = await openPublished(host, catalogue, files, (fraction) => report({ label, fraction }), signal);
-				return { model, file: { name: name ?? lastSegment(step.url), sha256: pin, size: step.size, download: step.url }, kept: false, seen };
+				const model = await openPublished(host, catalogue, listed.files, (fraction) => report({ label, fraction }), signal);
+				return { model, file: { name: name ?? listed.name, sha256: pin, size: listed.size, download: listed.download }, kept: false, seen };
 			} catch {
 				// Whatever went wrong (no server has the files, a hash that does not match, data that does not parse), the
 				// STEP file still opens.
@@ -134,7 +143,7 @@ export function opener() {
 		}
 		const downloading = (fraction: number | null) => report({ label: `Downloading ${title}`, fraction, ...(unpublished ? { note: unpublished } : {}) });
 		if (source.kind !== 'blob' || !localFile(source.sha256)) downloading(null);
-		const { bytes, ...file } = await loadSource(source, name, host, downloading, signal, listed?.version.step.size);
+		const { bytes, ...file } = await loadSource(source, name, host, downloading, signal, listed?.size);
 		signal.throwIfAborted();
 		let model = converted.get(file.sha256);
 		if (!model) {

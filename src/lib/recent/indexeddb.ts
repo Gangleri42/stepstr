@@ -2,7 +2,7 @@
 // converter made, so a file reopens without being downloaded or converted again, and the bytes of files from this
 // device. Kept models and files share a budget; past it the oldest go first, and their entries stay, as links.
 import type { MeasureData } from '$lib/measure/format';
-import type { KeptModel, RecentEntry, RecentStore } from './types';
+import type { KeptCompanion, KeptModel, RecentEntry, RecentStore } from './types';
 import { asEntry, RECENT_LIMIT } from './types';
 
 const NAME = 'stepstr';
@@ -14,11 +14,17 @@ const OPEN_MS = 5000;
 
 /** An entry as stored, with the bytes kept for it. */
 type Row = Omit<RecentEntry, 'kept'> & { kept: number };
-/** A kept model. Its measurements are JSON text so the budget can count their size. */
-type ModelRow = { id: string; sha256: string; conversion: string; model: Omit<KeptModel, 'measure'>; measure: string };
+/** A model as kept, its measurements as JSON text so the budget can count their size. */
+type Stored = { model: Omit<KeptModel, 'measure'>; measure: string };
+/**
+ * A kept model, and the companion shown with it last. The companion came after version 1 of the database: a row
+ * without one reads as before, so no upgrade is needed.
+ */
+type ModelRow = Stored & { id: string; sha256: string; conversion: string; with?: Stored & { sha256: string } };
 type FileRow = { sha256: string; bytes: Uint8Array };
 type Stores = { recent: IDBObjectStore; models: IDBObjectStore; files: IDBObjectStore };
-type Kept = Parameters<RecentStore['remember']>[1];
+/** What `remember` keeps of a model, in the form it is stored in. */
+type Kept = { conversion: string; model: Stored; bytes?: Uint8Array; with?: Stored & { sha256: string } };
 
 const request = <T>(r: IDBRequest<T>) =>
 	new Promise<T>((resolve, reject) => {
@@ -36,6 +42,11 @@ const asRow = (value: unknown): Row | null => {
 	return entry ? { ...entry, kept: typeof kept === 'number' && kept > 0 ? kept : 0 } : null;
 };
 const entryOf = ({ kept, ...entry }: Row): RecentEntry => ({ ...entry, kept: kept > 0 });
+const stored = ({ measure, ...model }: KeptModel): Stored => ({ model, measure: JSON.stringify(measure) });
+const keptOf = (row: Stored): KeptModel => ({ ...row.model, measure: JSON.parse(row.measure) as MeasureData });
+/** What a companion read back is, or nothing when the row's is not one. */
+const companionOf = (row: ModelRow['with']): KeptCompanion | undefined =>
+	row && typeof row.sha256 === 'string' && typeof row.measure === 'string' ? { sha256: row.sha256, model: keptOf(row) } : undefined;
 
 /** The bytes this site may fill with kept models: the budget, or half of what the browser grants when that is less. */
 async function room(budget: number) {
@@ -131,8 +142,8 @@ export function indexedDbRecent(factory: IDBFactory | null = globalThis.indexedD
 		});
 		return Promise.all(drops);
 	};
-	/** Puts the entry in, with its model when given. */
-	const record = (entry: RecentEntry, kept: Kept | null, measure: string, room: number) =>
+	/** Puts the entry in, with its model and companion when given. */
+	const record = (entry: RecentEntry, kept: Kept | null, room: number) =>
 		pass(async (stores) => {
 			const { recent, models, files } = stores;
 			const before = asRow(await request(recent.get(entry.key)));
@@ -140,12 +151,14 @@ export function indexedDbRecent(factory: IDBFactory | null = globalThis.indexedD
 			if (kept) {
 				// A model of these bytes by another conversion is of no more use.
 				for (const id of await request(models.index('sha256').getAllKeys(entry.sha256))) models.delete(id);
-				const { measure: _, ...model } = kept.model;
-				models.put({ id: `${entry.sha256} ${kept.conversion}`, sha256: entry.sha256, conversion: kept.conversion, model, measure } satisfies ModelRow);
+				const { model, with: companion } = kept;
+				const row: ModelRow = { id: `${entry.sha256} ${kept.conversion}`, sha256: entry.sha256, conversion: kept.conversion, ...model };
+				models.put(companion ? { ...row, with: companion } : row);
 				if (kept.bytes) files.put({ sha256: entry.sha256, bytes: kept.bytes } satisfies FileRow);
 				// A file kept before stays, and counts.
 				const file = kept.bytes?.byteLength ?? ((await request(files.count(entry.sha256))) ? entry.size : 0);
-				bytes = kept.model.glb.byteLength + measure.length + file;
+				const size = (one: Stored) => one.model.glb.byteLength + one.measure.length;
+				bytes = size(model) + (companion ? size(companion) : 0) + file;
 			}
 			recent.put({ ...entry, thumbnail: entry.thumbnail ?? before?.thumbnail ?? null, kept: bytes } satisfies Row);
 			const rows = (await request(recent.getAll())).map(asRow).filter((r): r is Row => !!r);
@@ -162,17 +175,24 @@ export function indexedDbRecent(factory: IDBFactory | null = globalThis.indexedD
 				return [];
 			}
 		},
-		remember(entry, kept) {
-			const measure = kept ? JSON.stringify(kept.model.measure) : '';
+		remember(entry, given) {
+			const kept: Kept | null = given
+				? {
+						conversion: given.conversion,
+						model: stored(given.model),
+						...(given.bytes ? { bytes: given.bytes } : {}),
+						...(given.with ? { with: { sha256: given.with.sha256, ...stored(given.with.model) } } : {})
+					}
+				: null;
 			// Queued at once, so a later removal cannot overtake it, and retried in the same turn.
 			return serial(async () => {
 				// Worked out before the pass: a transaction ends when it waits on anything but its own requests.
 				const space = await room(budget);
 				try {
-					await record(entry, kept ?? null, measure, space);
+					await record(entry, kept, space);
 				} catch {
 					// Most likely the browser's own quota, smaller than the budget: the entry goes in without its model.
-					if (kept) await record(entry, null, '', space);
+					if (kept) await record(entry, null, space);
 				}
 			}).catch(() => undefined);
 		},
@@ -214,7 +234,8 @@ export function indexedDbRecent(factory: IDBFactory | null = globalThis.indexedD
 				]);
 				const entry = asRow(value);
 				if (!entry || !row || typeof row.measure !== 'string') return null;
-				return { model: { ...row.model, measure: JSON.parse(row.measure) as MeasureData }, entry: { ...entryOf(entry), thumbnail: null } };
+				const companion = companionOf(row.with);
+				return { model: keptOf(row), entry: { ...entryOf(entry), thumbnail: null }, ...(companion ? { with: companion } : {}) };
 			} catch {
 				return null;
 			}

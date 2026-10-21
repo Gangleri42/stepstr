@@ -1,12 +1,14 @@
 // Opening a STEP file from the conversion its site published, built here as a site's builder does (pipeline/convert.ts)
 // from the Seed test file.
 import { IDBFactory } from 'fake-indexeddb';
+import { zipSync } from 'fflate';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { convert, publishable, WASM, type Published } from '../../../pipeline/convert';
 import { fixtureBytes, fixtureFile, FIXTURES } from '../../../test/fixtures';
 import { CONVERTER, lacking } from '../../../test/prerequisites';
 import type { Catalogue } from '$lib/catalogue/catalogue';
 import { fixtureCatalogue } from '$lib/catalogue/fixture';
+import { companionFile } from '$lib/catalogue/versions';
 import type { Converter } from '$lib/convert/types';
 import type { Host, Transport } from '$lib/host/host';
 import { TransportError } from '$lib/host/host';
@@ -15,7 +17,7 @@ import { indexedDbRecent } from '$lib/recent/indexeddb';
 import type { RecentStore } from '$lib/recent/types';
 import { sha256Hex } from '$lib/source/sha256';
 import type { FileSource } from '$lib/state/hash';
-import { opener, UNPUBLISHED, type Stage } from './open';
+import { COMPANION_UNPUBLISHED, companionStages, opener, UNPUBLISHED, type Stage } from './open';
 import { openPublished } from './published';
 
 vi.mock('$lib/about', () => ({ ABOUT: { source: null, converter: 'converter', conversion: 'this-conversion' } }));
@@ -135,6 +137,60 @@ describe.skipIf(lacking({ ...CONVERTER, path: WASM }, fixtureFile('seed-v15')))(
 		expect(again.opened.model.measure).toEqual(opened.model.measure);
 		expect(transport.blob).not.toHaveBeenCalled();
 	});
+
+	it('keeps the companion shown with a model, so both open again from this device', async () => {
+		const recent = indexedDbRecent(new IDBFactory());
+		const { host, transport } = hostFor(catalogueFor(published), [published.glb, published.measure], recent);
+		const { opened } = await open(host);
+		const entry = { key: `sha256:${seed.sha256}`, route: '#/lamp@aaaaaaa?b=eeeeeee', name: opened.file.name, sha256: seed.sha256, size: seed.size, parts: 1, viewedAt: 1, local: false, thumbnail: null };
+		const companion = { sha256: 'c'.repeat(64), model: { ...opened.model, download: null } };
+		await recent.remember(entry, { conversion: 'this-conversion', model: { ...opened.model, download: opened.file.download }, with: companion });
+		transport.blob.mockClear();
+		const again = await open(host);
+		expect(again.opened.with?.sha256).toBe(companion.sha256);
+		expect(again.opened.with?.model.glb).toEqual(published.glb);
+		expect(transport.blob).not.toHaveBeenCalled();
+	});
+});
+
+describe.skipIf(lacking({ ...CONVERTER, path: WASM }, fixtureFile('seed-v15')))("a companion revision's files", () => {
+	/** The fixture catalogue's companion, made of the Seed test file: its zipped STEP file and its published files. */
+	function companionCatalogue(zipped: Uint8Array) {
+		const catalogue = catalogueFor(published);
+		const revision = catalogue.models.clock.companions!.revisions[0];
+		revision.step = { sha256: sha256Hex(zipped), size: zipped.length };
+		revision.files = { glb: published.summary.glb, measure: published.summary.measure };
+		return { catalogue, revision };
+	}
+	const zipped = () => zipSync({ 'insert.step': fixtureBytes('seed-v15')! }, { level: 0 });
+
+	it('open from its published files, as a version does', async () => {
+		const { catalogue, revision } = companionCatalogue(zipped());
+		const { host, transport, converter } = hostFor(catalogue, [published.glb, published.measure]);
+		const stages: Stage[] = [];
+		const opened = await opener()(host, companionFile(catalogue, revision), null, (stage) => stages.push(stage), new AbortController().signal);
+		expect(opened.model.glb).toEqual(published.glb);
+		expect(opened.file).toMatchObject({ sha256: revision.step.sha256, size: revision.step.size, download: `https://blossom.example.com/${revision.step.sha256}.zip` });
+		expect(converter.convert).not.toHaveBeenCalled();
+		expect(transport.blob).toHaveBeenCalledTimes(2);
+		expect(stages[0].label).toBe('Downloading Clock Insert');
+	});
+
+	it('fall back to its zipped STEP file, checked by hash and converted, when they cannot be had', async () => {
+		const bytes = zipped();
+		const { catalogue, revision } = companionCatalogue(bytes);
+		const { host, transport, converter } = hostFor(catalogue, [bytes]);
+		const stages: Stage[] = [];
+		const opened = await opener()(host, companionFile(catalogue, revision), null, companionStages((stage) => stages.push(stage)), new AbortController().signal);
+		expect(transport.blob.mock.calls.map(([sha256]) => sha256)).toEqual([published.summary.glb.sha256, published.summary.measure.sha256, revision.step.sha256]);
+		expect(converter.convert).toHaveBeenCalledOnce();
+		expect(converter.convert.mock.calls[0][0]).toEqual(fixtureBytes('seed-v15'));
+		expect(opened.model.glb).toEqual(converted.glb);
+		expect(opened.file).toMatchObject({ sha256: revision.step.sha256, name: 'insert.step' });
+		// Its parts have the converter's ids, not those its site published, and it says so.
+		expect(stages.filter((stage) => stage.note)).not.toEqual([]);
+		expect(stages.every((stage) => !stage.note || stage.note === COMPANION_UNPUBLISHED)).toBe(true);
+	}, 60_000);
 });
 
 describe('the two files of a published conversion', () => {

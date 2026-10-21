@@ -1,19 +1,33 @@
-// A conversion a site published for a STEP file in its catalogue: the meshopt-compressed GLB and the gzipped
-// measurement data (pipeline/convert.ts), fetched from the catalogue's Blossom servers in place of the STEP file and
-// the converter. Each file must have the hash the catalogue names, and the measurement data must name the GLB.
+// A conversion a site published for a STEP file in its catalogue, a version's or a companion revision's: the
+// meshopt-compressed GLB and the gzipped measurement data (pipeline/convert.ts), fetched from the catalogue's Blossom
+// servers in place of the STEP file and the converter. Each file must have the hash the catalogue names, and the measurement data must name the GLB.
 import { gunzipSync } from 'fflate';
-import type { Blob as BlobRef, Catalogue, CatalogueModel, CatalogueVersion } from '$lib/catalogue/catalogue';
+import type { Blob as BlobRef, Catalogue, CatalogueVersion } from '$lib/catalogue/catalogue';
 import type { Converted } from '$lib/convert/types';
 import type { Host, Progress } from '$lib/host/host';
 import { TransportError } from '$lib/host/host';
 import { MEASURE_VERSION, type MeasureData } from '$lib/measure/format';
+import { blobUrl } from '$lib/source/blossom';
+import { lastSegment } from '$lib/source/load';
 import { sha256Hex } from '$lib/source/sha256';
 
-/** The catalogue's version whose STEP file has this sha256, with its model. */
-export function listedStep(catalogue: Catalogue, sha256: string): { model: CatalogueModel; version: CatalogueVersion } | null {
+/**
+ * A STEP file the catalogue lists: a version's, or a companion revision's zipped one. `download` is where the file is
+ * fetched from, `name` what it is called there.
+ */
+export type ListedStep = { title: string; name: string; size: number; download: string; files: CatalogueVersion['files'] };
+
+/** The catalogue's version or companion revision whose STEP file has this sha256. */
+export function listedStep(catalogue: Catalogue, sha256: string): ListedStep | null {
 	for (const model of Object.values(catalogue.models)) {
 		const version = model.versions.find((v) => v.step.sha256 === sha256);
-		if (version) return { model, version };
+		if (version) return { title: model.title, name: lastSegment(version.step.url), size: version.step.size, download: version.step.url, files: version.files };
+		const track = model.companions;
+		const revision = track?.revisions.find((r) => r.step.sha256 === sha256);
+		if (track && revision) {
+			const download = blobUrl(catalogue.servers[0], sha256, 'zip');
+			return { title: `${model.title} ${track.label}`, name: lastSegment(download), size: revision.step.size, download, files: revision.files };
+		}
 	}
 	return null;
 }

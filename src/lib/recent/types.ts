@@ -26,16 +26,18 @@ export type RecentEntry = {
 
 /** A converted file as kept: enough to show it again without the STEP file or the converter. */
 export type KeptModel = Omit<Converted, 'ms'> & { download: string | null };
+/** A model shown with another in one of its parts (a catalogue's companion), kept with it; `sha256` names its file. */
+export type KeptCompanion = { sha256: string; model: KeptModel };
 
 export interface RecentStore {
 	/** Newest first. */
 	list(): Promise<RecentEntry[]>;
 	/**
 	 * Records a file as viewed now. An entry without a picture keeps the one it had. With room for them, the store keeps
-	 * the model the build's conversion `conversion` (ABOUT.conversion) made of it, and the bytes of a file from this
-	 * device. Never fails: a store that cannot write records nothing.
+	 * the model the build's conversion `conversion` (ABOUT.conversion) made of it, the companion shown with it, and the
+	 * bytes of a file from this device. Never fails: a store that cannot write records nothing.
 	 */
-	remember(entry: RecentEntry, kept?: { conversion: string; model: KeptModel; bytes?: Uint8Array }): Promise<void>;
+	remember(entry: RecentEntry, kept?: { conversion: string; model: KeptModel; bytes?: Uint8Array; with?: KeptCompanion }): Promise<void>;
 	/** The view an entry reopens with. */
 	update(key: string, route: string): Promise<void>;
 	forget(key: string): Promise<void>;
@@ -43,10 +45,10 @@ export interface RecentStore {
 	/** The entry with this key as kept, without its picture; null when there is none or the store does not answer. */
 	entry(key: string): Promise<RecentEntry | null>;
 	/**
-	 * The model this conversion made of the file with this key and sha256, with the file's entry (without its picture),
-	 * read together; null when either is not kept.
+	 * The model this conversion made of the file with this key and sha256, with the file's entry (without its picture)
+	 * and the companion last kept with it, read together; null when the model or the entry is not kept.
 	 */
-	model?(key: string, sha256: string, conversion: string): Promise<{ model: KeptModel; entry: RecentEntry } | null>;
+	model?(key: string, sha256: string, conversion: string): Promise<{ model: KeptModel; entry: RecentEntry; with?: KeptCompanion } | null>;
 	/** The bytes of a file from this device, when kept. */
 	file?(sha256: string): Promise<Uint8Array | null>;
 }

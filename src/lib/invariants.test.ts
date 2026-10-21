@@ -8,13 +8,13 @@ import * as nip19 from 'nostr-tools/nip19';
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fixtureCatalogue } from '$lib/catalogue/fixture';
-import { resolveModel, type CatalogueSource } from '$lib/catalogue/versions';
+import { companionFile, resolveModel, type CatalogueSource } from '$lib/catalogue/versions';
 import { converterFetcher } from '$lib/convert/converter-source';
 import type { Host, Transport } from '$lib/host/host';
 import { TransportError } from '$lib/host/host';
 import { nappletTransport } from '$lib/host/napplet-transport';
 import { webTransport } from '$lib/host/web-transport';
-import { openPublished } from '$lib/open/published';
+import { listedStep, openPublished } from '$lib/open/published';
 import { loadSource } from '$lib/source/load';
 import type { NostrEventLike } from '$lib/source/nostr-files';
 import { sha256Hex } from '$lib/source/sha256';
@@ -105,6 +105,19 @@ describe('a link pinned to a sha256 opens those bytes or nothing', () => {
 		// A transport that checks nothing, and servers that send other bytes under these names.
 		const lying: Transport = { blob: async () => ({ bytes: OTHER, url: null }), url: async () => OTHER };
 		await expect(openPublished(hostWith(lying), catalogue, files, () => {}, new AbortController().signal)).rejects.toMatchObject({ reason: 'mismatch' });
+	});
+
+	it("and a companion's files as its published files or its zipped STEP file, each by the hash the catalogue names", async () => {
+		const catalogue = fixtureCatalogue();
+		const track = catalogue.models.clock.companions!;
+		track.revisions[0].step.sha256 = PIN;
+		const { companion } = resolveModel(catalogue, decode('#/clock', catalogue).source as CatalogueSource)!;
+		expect(companion).toMatchObject({ kind: 'revision', revision: { id: 'eeeeeee' } });
+		const lying: Transport = { blob: async () => ({ bytes: OTHER, url: null }), url: async () => OTHER };
+		const listed = listedStep(catalogue, PIN)!;
+		expect(listed.files).toBe(track.revisions[0].files);
+		await expect(openPublished(hostWith(lying), catalogue, listed.files, () => {}, new AbortController().signal)).rejects.toMatchObject({ reason: 'mismatch' });
+		await expect(loadSource(companionFile(catalogue, track.revisions[0]), null, hostWith(lying), () => {})).rejects.toMatchObject({ reason: 'mismatch' });
 	});
 
 	it('and an unpinned link is pinned to the bytes it fetched', async () => {

@@ -51,6 +51,14 @@ export function fixtureCatalogue(): Catalogue {
 							subject: 'Shape the insert',
 							step: { sha256: hash('insert step'), size: 900000 },
 							files: { glb: { sha256: hash('insert glb'), size: 300 }, measure: { sha256: hash('insert measure'), size: 200 } }
+						},
+						{
+							id: '2222222',
+							commit: '2222222'.padEnd(40, '0'),
+							date: '2026-09-12',
+							subject: 'Place the parts',
+							step: { sha256: hash('old insert step'), size: 880000 },
+							files: { glb: { sha256: hash('old insert glb'), size: 290 }, measure: { sha256: hash('old insert measure'), size: 190 } }
 						}
 					]
 				}

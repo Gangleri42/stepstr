@@ -245,14 +245,17 @@ export async function buildModel(source: ModelSource, options: BuildOptions): Pr
 		if (!solid.groups.length) return null;
 		const mesh = doc.createMesh(manifest.meshes[idx].body);
 		for (const { appearance: own, geometry } of solid.groups) {
-			// Faces in the body's own colour take the instance colour; faces with a colour of their own keep it.
+			// Faces in the body's own colour take the instance colour; faces with a colour of their own keep it. A face's
+			// own colour can have the instance colour's name, which gives both groups one material, so the group in the
+			// body's own colour is marked (`own`) for the viewer to tell apart: a metal finish goes on it alone.
 			const material = own ? materialFor(own) : materialFor(appearance);
 			const position = accessor('VEC3', geometry.positions);
-			mesh.addPrimitive(
-				doc.createPrimitive().setAttribute('POSITION', position).setAttribute('NORMAL', accessor('VEC3', geometry.normals))
-					.setAttribute('_FACEID', accessor('SCALAR', faceIdArray(geometry.faces)))
-					.setIndices(accessor('SCALAR', geometry.indices)).setMaterial(material)
-			);
+			const triangles = doc.createPrimitive().setAttribute('POSITION', position)
+				.setAttribute('NORMAL', accessor('VEC3', geometry.normals))
+				.setAttribute('_FACEID', accessor('SCALAR', faceIdArray(geometry.faces)))
+				.setIndices(accessor('SCALAR', geometry.indices)).setMaterial(material);
+			if (!own) triangles.setExtras({ own: true });
+			mesh.addPrimitive(triangles);
 			if (geometry.edges.length) {
 				mesh.addPrimitive(
 					doc.createPrimitive().setMode(Primitive.Mode.LINES).setAttribute('POSITION', position)
@@ -264,10 +267,12 @@ export async function buildModel(source: ModelSource, options: BuildOptions): Pr
 		return mesh;
 	}
 
+	// `ownFlagged` says the file marks the triangles in each body's own colour (`own`), so a body without the mark has
+	// no such faces; a file from before the mark lacks the key, and the viewer then falls back to each body's first group.
 	const root = doc.createNode(options.title)
 		.setScale([0.001, 0.001, 0.001])
 		.setRotation([-Math.SQRT1_2, 0, 0, Math.SQRT1_2])
-		.setExtras({ doc: manifest.doc, units: 'mm', up: 'z' });
+		.setExtras({ doc: manifest.doc, units: 'mm', up: 'z', ownFlagged: true });
 	doc.createScene(options.title).addChild(root);
 
 	const nodes = new Map<string | null, Node>([[null, root]]);

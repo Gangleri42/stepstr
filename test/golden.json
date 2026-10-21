@@ -4,16 +4,16 @@
 		"triangles": 24598,
 		"unit": "mm",
 		"warnings": [],
-		"glb": "54b831730a18c0c5ed9521d7f63ec2c3e76a7180ae3ccbdb051bc94446ae8987",
-		"measure": "9b9a8e2987ea15ed873cf58d036ade43788bd5050001597e5554527500039695"
+		"glb": "efcb29bb5dcfe434d2c472d29123b6435d26425b6ac8a3460ff6a1205bb0d064",
+		"measure": "0221cce584ae5aab5ddb4e9b4b90d27409249bda247ae54ee715ad5ea3446f07"
 	},
 	"seed-v15 planned": {
 		"solids": 53,
 		"triangles": 24598,
 		"unit": "mm",
 		"warnings": [],
-		"glb": "54b831730a18c0c5ed9521d7f63ec2c3e76a7180ae3ccbdb051bc94446ae8987",
-		"measure": "9b9a8e2987ea15ed873cf58d036ade43788bd5050001597e5554527500039695"
+		"glb": "efcb29bb5dcfe434d2c472d29123b6435d26425b6ac8a3460ff6a1205bb0d064",
+		"measure": "0221cce584ae5aab5ddb4e9b4b90d27409249bda247ae54ee715ad5ea3446f07"
 	},
 	"hammer-v50": {
 		"solids": 110,
@@ -22,8 +22,8 @@
 		"warnings": [
 			"hammer_nose: 1 face(s) meshed as NURBS after BRepMesh gave up"
 		],
-		"glb": "ade2b555aa079151a842d3d0e4fb6b0406a5c46917c627dbf53ff44c142f2643",
-		"measure": "ea1ec7469e53a3ee326148aacd791b297935a0830935afcd543c8c1d9020b947"
+		"glb": "d0aa11a4eb1501ff2fbefc1f735c08e61d6d0f6dc9126678d0dc827c126e05a3",
+		"measure": "f9eb0e07d95ee55072e79a1363ad8c3a7070d684408f269bba6dd0e33e53902d"
 	},
 	"hammer-v50 planned": {
 		"solids": 110,
@@ -32,7 +32,7 @@
 		"warnings": [
 			"hammer_nose: 1 face(s) meshed as NURBS after BRepMesh gave up"
 		],
-		"glb": "7167ca1a39ea28eb32169fcde923de11496fd5a430b073f175fa49eef1ae1dfb",
-		"measure": "cf915b4567d5c5a032e83d83696fd3d42227637585b187e096fa709c10a6421b"
+		"glb": "afd27de419aca87753381428f4b8878c48321f5a4eb4abba061c8e3b4bc8103b",
+		"measure": "fbe8ca7d47ee6a1ed26b81f72fc8899360cd515717ea986aa016a60dabfa1f49"
 	}
 }

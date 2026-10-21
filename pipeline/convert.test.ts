@@ -77,6 +77,29 @@ describe.skipIf(skip)('a STEP file converted in Node', () => {
 		}
 	});
 
+	it("marks the triangles in each body's own colour, which finishes put metal on, through the compression", async () => {
+		const [before, after] = await Promise.all([parse(converted.glb), parse(published.glb)]);
+		const count = (scene: THREE.Object3D) => {
+			let withOwn = 0, without = 0;
+			scene.traverse((object) => {
+				if (!object.userData.body) return;
+				const meshes = ((object as THREE.Mesh).isMesh ? [object] : object.children) as THREE.Mesh[];
+				const own = meshes.filter((mesh) => mesh.geometry?.userData.own === true);
+				// One group of triangles at most: the converter writes the body's own colour as one group.
+				expect(own.length).toBeLessThanOrEqual(1);
+				for (const mesh of own) expect(mesh.isMesh).toBe(true);
+				if (own.length) withOwn++;
+				else without++;
+			});
+			return { withOwn, without };
+		};
+		// The file's root node says it marks them, so the viewer reads an unmarked body as one without such faces.
+		for (const scene of [before, after]) expect(scene.children[0].userData.ownFlagged).toBe(true);
+		// The test file has both: bodies with faces in their own colour, and bodies whose faces all carry colours of their own.
+		expect(count(before)).toEqual({ withOwn: 40, without: 103 });
+		expect(count(after)).toEqual(count(before));
+	});
+
 	it('keeps all the measurement data, naming the published GLB', () => {
 		const measure = gunzipSync(published.measure).toString('utf8');
 		expect(measure).toBe(JSON.stringify({ ...converted.measure, glb: sha256(published.glb) }));

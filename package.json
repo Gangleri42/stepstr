@@ -24,6 +24,7 @@
 		"dev:shell": "node scripts/dev-shell/serve.mjs",
 		"test:conformance": "napplet-conformance ./dist-napplet",
 		"test:e2e": "playwright test",
+		"converter:fetch": "node scripts/converter-fetch.mjs",
 		"fixtures": "node scripts/fixtures.mjs",
 		"oracle": "node scripts/oracle.mjs",
 		"publish:nostr": "tsx pipeline/publish-nostr.ts",

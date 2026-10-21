@@ -36,6 +36,7 @@ stepstr is a work in progress, derived from the [SeedHammer viewer](https://gith
 ```sh
 npm install
 converter/build.sh    # converter/dist/converter.wasm, in Docker; a few minutes the first time
+npm run converter:fetch   # or the same build, by its sha256, from the Blossom servers that hold it
 npm run dev           # the web page at http://localhost:5173
 npm run fixtures      # the test files, fetched by sha256 into .cache/fixtures
 npm run oracle        # the Python oracle's output for them, into .cache/oracle; needs uv

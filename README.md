@@ -57,6 +57,9 @@ Both builds and the publishing tools read `.nsite/config.json` for the site they
 for another site from the same checkout: they read `<dir>/.nsite/config.json` and write `<dir>/build` and
 `<dir>/dist-napplet`.
 
+A site can list its own models in `<dir>/catalogue.json` (`src/lib/catalogue/catalogue.ts`): each model's versions,
+their STEP files and the conversions published for them. The web page fetches it as it starts; the napplet carries it.
+
 ## Opening files
 
 Paste a link, drop a file or choose one. A link can be a GitHub file (page links become raw links; Git LFS files are

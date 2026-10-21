@@ -1,5 +1,6 @@
 // The viewer on a plain web page: the route lives in location.hash, files and events come over the network, and the
 // conversion runs in a Worker.
+import { parseCatalogue, type Catalogue } from '$lib/catalogue/catalogue';
 import { workerConverter } from '$lib/convert/web';
 import { indexedDbRecent } from '$lib/recent/indexeddb';
 import { conventionUri } from '$lib/state/route';
@@ -8,7 +9,23 @@ import { copyText } from './copy';
 import type { Host, ShareLink } from './host';
 import { webTransport } from './web-transport';
 
-export function createWebHost(servers: string[]): Host {
+/**
+ * The site's catalogue.json, fetched before the app starts. It goes to the network each time (the service worker keeps
+ * a copy for offline use), so a new publish shows at once. Null when it cannot be had or is not valid: the page then
+ * opens files as any stepstr does.
+ */
+export async function fetchCatalogue(url: string): Promise<Catalogue | null> {
+	try {
+		const response = await fetch(url, { cache: 'no-cache' });
+		if (response.ok) return parseCatalogue(await response.json());
+		console.warn(`${url}: ${response.status} ${response.statusText}`);
+	} catch (err) {
+		console.warn(`${url}: ${err instanceof Error ? err.message : String(err)}`);
+	}
+	return null;
+}
+
+export function createWebHost(servers: string[], catalogue?: Catalogue): Host {
 	return {
 		initialRoute: () => location.hash,
 		onRoute(listener) {
@@ -36,6 +53,7 @@ export function createWebHost(servers: string[]): Host {
 			window.open(url, '_blank', 'noopener,noreferrer');
 			return true;
 		},
-		recent: indexedDbRecent()
+		recent: indexedDbRecent(),
+		catalogue
 	};
 }

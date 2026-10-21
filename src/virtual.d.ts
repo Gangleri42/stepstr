@@ -4,10 +4,14 @@ declare module 'virtual:stepstr-about' {
 	export default about;
 }
 
-// The site's name, description, servers and napplet role, which both Vite configs generate (pipeline/site.ts).
+// The site's name, description, servers, napplet role and catalogue, which both Vite configs generate (pipeline/site.ts).
 declare module 'virtual:stepstr-site' {
 	export const title: string;
 	export const description: string;
 	export const servers: string[];
 	export const role: import('./lib/state/archetype').NappletRole;
+	/** The site's catalogue, which the napplet carries; null for a site without one. */
+	export const catalogue: import('./lib/catalogue/catalogue').Catalogue | null;
+	/** Whether the site has a catalogue, which the web page fetches as catalogue.json. */
+	export const hasCatalogue: boolean;
 }

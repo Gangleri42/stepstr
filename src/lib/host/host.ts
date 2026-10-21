@@ -1,6 +1,7 @@
 // What the viewer needs from wherever it runs. A plain web page has a URL, the network and a clipboard; a napplet
 // sandbox has none of those and asks its shell instead. Everything environment-specific goes through this seam so the
 // app itself stays one component tree.
+import type { Catalogue } from '$lib/catalogue/catalogue';
 import type { Converter } from '$lib/convert/types';
 import type { RecentStore } from '$lib/recent/types';
 import type { NostrEventLike } from '$lib/source/nostr-files';
@@ -79,4 +80,6 @@ export interface Host {
 	webViewer?(route: string): string;
 	/** Recently viewed files, kept on this device, where the environment has room for them. */
 	recent?: RecentStore;
+	/** The site's models and their versions, where it has a catalogue. */
+	catalogue?: Catalogue;
 }

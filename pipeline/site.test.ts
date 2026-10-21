@@ -7,16 +7,18 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { CONVERTER, lacking } from '../test/prerequisites.ts';
+import { fixtureCatalogue } from '../src/lib/catalogue/fixture.ts';
 import { nappletRole } from '../src/lib/state/archetype.ts';
 import { readConfig } from './nostr/config.ts';
 import { NAPPLET_TEMPLATE } from './nostr/manifest.ts';
-import { sitePaths, STEPSTR_DIR } from './site.ts';
+import { readCatalogue, sitePaths, STEPSTR_DIR } from './site.ts';
 
 describe('sitePaths', () => {
 	it('puts the config and both builds in the site directory, a relative one taken from the working directory', () => {
 		expect(sitePaths('/srv/site')).toEqual({
 			dir: '/srv/site',
 			config: '/srv/site/.nsite/config.json',
+			catalogue: '/srv/site/catalogue.json',
 			build: '/srv/site/build',
 			napplet: '/srv/site/dist-napplet'
 		});
@@ -75,32 +77,58 @@ function tree(dir: string): Record<string, string> | null {
 	return files;
 }
 
-describe.skipIf(lacking(CONVERTER))('a build for another site', () => {
-	const dir = mkdtempSync(join(tmpdir(), 'stepstr-site-'));
+describe('a site\'s catalogue', () => {
+	it('is read and checked when there is one', () => {
+		const dir = mkdtempSync(join(tmpdir(), 'stepstr-catalogue-'));
+		const path = join(dir, 'catalogue.json');
+		try {
+			expect(readCatalogue(path)).toBeNull();
+			const text = JSON.stringify(fixtureCatalogue(), null, '\t');
+			writeFileSync(path, text);
+			expect(readCatalogue(path)).toEqual({ text, catalogue: fixtureCatalogue() });
+			writeFileSync(path, JSON.stringify({ ...fixtureCatalogue(), home: 'anvil' }));
+			expect(() => readCatalogue(path)).toThrow(`${path}: the catalogue is not valid: catalogue.home names no model it lists`);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+});
+
+/** Writes a site's config, builds both outputs for it and returns their paths; stepstr's own builds must stay as they were. */
+function buildSite(dir: string, config: object, catalogue?: object) {
 	const site = sitePaths(dir);
 	const own = sitePaths(STEPSTR_DIR);
-	afterAll(() => rmSync(dir, { recursive: true, force: true }));
+	mkdirSync(join(dir, '.nsite'));
+	writeFileSync(site.config, JSON.stringify(config));
+	if (catalogue) writeFileSync(site.catalogue, JSON.stringify(catalogue, null, '\t'));
+	const before = [tree(own.build), tree(own.napplet)];
+	// Vitest's NODE_ENV would make development builds.
+	const env = { ...process.env, NODE_ENV: 'production', STEPSTR_SITE: dir };
+	for (const script of ['build', 'build:napplet']) execFileSync('npm', ['run', script], { cwd: STEPSTR_DIR, env, stdio: 'pipe' });
+	expect([tree(own.build), tree(own.napplet)]).toEqual(before);
+	return site;
+}
+
+describe.skipIf(lacking(CONVERTER))('a build for another site', () => {
+	const dirs: string[] = [];
+	const siteDir = () => {
+		dirs.push(mkdtempSync(join(tmpdir(), 'stepstr-site-')));
+		return dirs.at(-1)!;
+	};
+	afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
+	const stepstr = JSON.parse(readFileSync(sitePaths(STEPSTR_DIR).config, 'utf8'));
 
 	it('reads its config and writes its outputs, leaving stepstr\'s alone', () => {
-		const stepstr = JSON.parse(readFileSync(own.config, 'utf8'));
-		mkdirSync(join(dir, '.nsite'));
-		writeFileSync(
-			site.config,
-			JSON.stringify({
-				id: 'other',
-				title: 'Other & co',
-				description: 'Another "site".',
-				pubkey: stepstr.pubkey,
-				relays: ['wss://relay.example.com'],
-				servers: ['https://blossom.example.com'],
-				napplet: { archetype: 'cad-viewer', params: ['model', 'version'] }
-			})
-		);
-		const before = [tree(own.build), tree(own.napplet)];
-		// Vitest's NODE_ENV would make development builds.
-		const env = { ...process.env, NODE_ENV: 'production', STEPSTR_SITE: dir };
-		for (const script of ['build', 'build:napplet']) execFileSync('npm', ['run', script], { cwd: STEPSTR_DIR, env, stdio: 'pipe' });
-		expect([tree(own.build), tree(own.napplet)]).toEqual(before);
+		const site = buildSite(siteDir(), {
+			id: 'other',
+			title: 'Other & co',
+			description: 'Another "site".',
+			pubkey: stepstr.pubkey,
+			relays: ['wss://relay.example.com'],
+			servers: ['https://blossom.example.com'],
+			napplet: { archetype: 'cad-viewer', params: ['model', 'version'] }
+		});
+		expect(existsSync(join(site.build, 'catalogue.json'))).toBe(false);
 
 		const web = readFileSync(join(site.build, 'index.html'), 'utf8');
 		expect(web).toContain('<title>Open a STEP file · Other &amp; co</title>');
@@ -124,5 +152,17 @@ describe.skipIf(lacking(CONVERTER))('a build for another site', () => {
 		expect(tags('d')).toEqual([['d', 'other']]);
 		expect(tags('title')).toEqual([['title', 'Other & co']]);
 		expect(tags('z')).toEqual([['z', 'cad-viewer']]);
+	}, 300_000);
+
+	it('carries its catalogue: beside the web page as written, inside the napplet as checked', () => {
+		const catalogue = fixtureCatalogue();
+		const site = buildSite(siteDir(), { ...stepstr, id: 'catalogued', title: 'Catalogued' }, catalogue);
+		expect(readFileSync(join(site.build, 'catalogue.json'), 'utf8')).toBe(JSON.stringify(catalogue, null, '\t'));
+		// The web page fetches it, so its code holds none of it.
+		const scripts = Object.keys(tree(join(site.build, '_app'))!).map((path) => readFileSync(join(site.build, '_app', path), 'utf8')).join('\n');
+		expect(scripts).not.toContain(catalogue.models.stand.versions[0].step.sha256);
+		const page = readFileSync(join(site.napplet, 'index.html'), 'utf8');
+		for (const { versions } of Object.values(catalogue.models)) for (const v of versions) expect(page).toContain(v.step.sha256);
+		expect(page).toContain(catalogue.conversion);
 	}, 300_000);
 });

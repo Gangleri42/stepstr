@@ -8,7 +8,8 @@ import { mainThreadConverter } from '$lib/convert/main-thread';
 import { createNappletHost } from '$lib/host/napplet';
 import { openInbox } from '$lib/host/napplet-inbox';
 import { nappletTransport } from '$lib/host/napplet-transport';
-import { converter, servers, webOrigin } from 'virtual:stepstr';
+import { converter, webOrigin } from 'virtual:stepstr';
+import { catalogue, servers } from 'virtual:stepstr-site';
 
 // Subscribe before anything heavy runs: the shell may deliver the opening intent right away.
 openInbox(servers);
@@ -16,5 +17,13 @@ openInbox(servers);
 const transport = nappletTransport();
 mount(App, {
 	target: document.getElementById('app')!,
-	props: { host: createNappletHost({ converter: mainThreadConverter(converterFetcher(transport, converter, servers)), servers, webOrigin, transport }) }
+	props: {
+		host: createNappletHost({
+			converter: mainThreadConverter(converterFetcher(transport, converter, servers)),
+			servers,
+			webOrigin,
+			transport,
+			catalogue: catalogue ?? undefined
+		})
+	}
 });

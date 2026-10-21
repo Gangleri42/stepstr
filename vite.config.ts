@@ -5,7 +5,7 @@ import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 import { aboutModule } from './pipeline/about.ts';
 import { readConfig } from './pipeline/nostr/config.ts';
-import { escapeAttribute, SITE, siteModule } from './pipeline/site.ts';
+import { catalogueFile, escapeAttribute, SITE, siteModule } from './pipeline/site.ts';
 
 // SvelteKit stamps the build into _app/version.json; the last commit that touched the app, instead of the clock,
 // keeps two builds of the same source byte-identical, which is how the Nostr publisher knows nothing changed.
@@ -21,11 +21,15 @@ const commit = (() => {
 // The site's description for src/app.html, which SvelteKit fills in from the public environment as it is: escaped here.
 process.env.PUBLIC_SITE_DESCRIPTION = escapeAttribute(readConfig(SITE.config).description);
 
+// Served at the root of the nsite. Set BASE_PATH=/<dir> for a deploy under a sub-path.
+const base = (process.env.BASE_PATH ?? '') as '' | `/${string}`;
+
 export default defineConfig({
 	// The dev server hands the Worker the converter from converter/dist.
 	server: { fs: { allow: ['converter'] } },
 	plugins: [
 		siteModule(),
+		catalogueFile(base),
 		aboutModule(fileURLToPath(new URL('./converter/dist/converter.wasm', import.meta.url))),
 		sveltekit({
 			compilerOptions: {
@@ -35,8 +39,7 @@ export default defineConfig({
 			},
 			// Single static page; all view state lives in the URL hash. Written into the site's directory (pipeline/site.ts).
 			adapter: adapter({ pages: SITE.build, assets: SITE.build, fallback: undefined }),
-			// Served at the root of the nsite. Set BASE_PATH=/<dir> for a deploy under a sub-path.
-			paths: { base: (process.env.BASE_PATH ?? '') as '' | `/${string}` },
+			paths: { base },
 			// The converter (converter/): its loader, and the wasm module the web build serves next to the page.
 			alias: { $converter: 'converter' },
 			version: { name: commit },

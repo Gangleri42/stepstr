@@ -1,6 +1,7 @@
 // The viewer inside a NIP-5D shell. There is no URL: routes come in as intents and go out as share links; bytes and
 // events come from the shell; the converter runs on the page's own thread; the shell opens external links and reports
 // its theme.
+import type { Catalogue } from '$lib/catalogue/catalogue';
 import type { Converter } from '$lib/convert/types';
 import { nappletRecent } from '$lib/recent/napplet';
 import { conventionUri } from '$lib/state/route';
@@ -47,9 +48,11 @@ export type NappletHostOptions = {
 	/** Where the web viewer lives; share links point there. */
 	webOrigin: string | null;
 	transport?: Transport;
+	/** The site's catalogue, which the napplet carries. */
+	catalogue?: Catalogue;
 };
 
-export function createNappletHost({ converter, servers, webOrigin, transport = nappletTransport() }: NappletHostOptions): Host {
+export function createNappletHost({ converter, servers, webOrigin, transport = nappletTransport(), catalogue }: NappletHostOptions): Host {
 	const storage = has('storage', 'getItem', 'setItem', 'removeItem');
 	return {
 		initialRoute: () => inbox.latest ?? '',
@@ -79,6 +82,7 @@ export function createNappletHost({ converter, servers, webOrigin, transport = n
 		},
 		...(has('fs', 'pickFile', 'read') ? { pickFile: pickWithShell } : {}),
 		...(storage ? { recent: nappletRecent(storage) } : {}),
-		...(webOrigin ? { webViewer: (route: string) => `${webOrigin}/${route}` } : {})
+		...(webOrigin ? { webViewer: (route: string) => `${webOrigin}/${route}` } : {}),
+		catalogue
 	};
 }

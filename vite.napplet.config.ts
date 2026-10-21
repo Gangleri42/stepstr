@@ -26,9 +26,10 @@ export { CONVERTER_FILE };
 /**
  * Build-time data. The converter does not ride inside the napplet: pipeline/napplet-manifest.ts writes it next to
  * index.html after the build, it is published as a Blossom blob of its own, and the napplet fetches it by its hash
- * through the shell when it first converts a file. The dev server serves it by URL instead. Also: the Blossom servers,
- * where the web viewer lives, the mark as the page's icon, and the napplet's declarations in the head, as NIP-5D maps
- * them, which the manifest is read from. CONVERTER_WASM swaps in another converter.
+ * through the shell when it first converts a file. The dev server serves it by URL instead. Also: where the web viewer
+ * lives, the mark as the page's icon, and the napplet's declarations in the head, as NIP-5D maps them, which the
+ * manifest is read from. The site's servers and catalogue come in through virtual:stepstr-site (pipeline/site.ts).
+ * CONVERTER_WASM swaps in another converter.
  */
 function stepstr(): Plugin {
 	const id = 'virtual:stepstr';
@@ -77,7 +78,6 @@ function stepstr(): Plugin {
 			const webOrigin = site.url ?? siteOrigin(site.pubkey, site.id, site.gatewayHostnames[0]);
 			return [
 				`export const converter = ${JSON.stringify({ sha256, source: devUrl ?? `blossom:sha256:${sha256}` })};`,
-				`export const servers = ${JSON.stringify(site.servers)};`,
 				`export const webOrigin = ${JSON.stringify(webOrigin)};`
 			].join('\n');
 		}

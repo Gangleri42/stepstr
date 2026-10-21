@@ -31,8 +31,8 @@ export function findVersion(model: CatalogueModel, version: string | undefined):
 	return model.versions.find((v) => version.startsWith(v.id));
 }
 
-/** "aaaaaaa · 14 Oct" for the version picker: the id and the commit's day, in UTC. */
-export function versionLabel(version: CatalogueVersion) {
+/** "aaaaaaa · 14 Oct" for the version and companion pickers: the id and the commit's day, in UTC. */
+export function versionLabel(version: Pick<CatalogueVersion, 'id' | 'date'>) {
 	const date = new Date(version.date);
 	const day = Number.isNaN(date.getTime()) ? '' : ` · ${date.getUTCDate()} ${date.toLocaleString('en', { month: 'short', timeZone: 'UTC' })}`;
 	return `${version.id}${day}`;

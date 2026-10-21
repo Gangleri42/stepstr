@@ -2,11 +2,13 @@
 	import { onMount, untrack } from 'svelte';
 	import mark from '../../brand/icon.svg?raw';
 	import { ABOUT } from '$lib/about';
+	import type { CompanionRevision, CompanionTrack } from '$lib/catalogue/catalogue';
 	import { companionFile, companionParam, resolveModel, versionLabel, type CatalogueSource, type Resolved } from '$lib/catalogue/versions';
 	import type { Host, ShareLink } from '$lib/host/host';
 	import type { MeasureData } from '$lib/measure/format';
 	import { routeFromInput } from '$lib/source/input';
 	import { companionStages, opener, type Stage } from '$lib/open/open';
+	import { blobUrl } from '$lib/source/blossom';
 	import { explainLoadError } from '$lib/source/load';
 	import { addLocalFile, localFile } from '$lib/source/local';
 	import type { KeptCompanion, KeptModel, RecentEntry } from '$lib/recent/types';
@@ -48,6 +50,7 @@
 	let panelOpen = $state(true);
 	let sectionOpen = $state(false);
 	let shareOpen = $state(false);
+	let stepOpen = $state(false);
 	let copied = $state<string | null>(null);
 	let fallback = $state<{ label: string; text: string } | null>(null);
 	/** Files viewed before on this device, newest first. */
@@ -106,6 +109,9 @@
 	}
 	/** The catalogue model the route names, as the catalogue resolves it, for the picker. */
 	const picked = $derived(view.source?.kind === 'catalogue' ? (fileOf(view.source)?.listed ?? null) : null);
+	/** The companion revision in the slot of the model on screen, and one that was asked for and could not be fitted. */
+	let companionShown = $state.raw<{ track: CompanionTrack; revision: CompanionRevision } | null>(null);
+	let companionFailed = $state.raw<{ id: string; reason: string } | null>(null);
 	/** What a link to a version or a companion revision the catalogue does not list is told: it shows other bytes. */
 	function lost({ model, version, missing, companion, companionMissing }: Resolved) {
 		const said = missing ? [`The catalogue lists no version ${missing} of ${model.title}, so the latest opened.`] : [];
@@ -360,6 +366,9 @@
 				warnings: converted.warnings
 			};
 			measureData = { key: shownKey, data: companion && fitted ? [converted.measure, companion.model.measure] : [converted.measure] };
+			companionShown = choice && fitted ? { track: choice.track, revision: choice.revision } : null;
+			companionFailed = choice && !fitted ? { id: choice.revision.id, reason: misfit } : null;
+			stepOpen = false;
 			measureError = '';
 			// Which model is on screen, and which companion in its slot, by their GLBs' sha256: for tests and bug reports.
 			document.documentElement.dataset.glb = converted.measure.glb;
@@ -694,6 +703,21 @@
 		view.measure = [];
 		notice = '';
 	}
+	/**
+	 * Another companion revision in the slot, or the part as in CAD, which a route pinned to a version shows unless it names
+	 * one. What the link names of the companion on screen goes with it: those parts and faces are not in another revision.
+	 */
+	function pickCompanion(value: string) {
+		if (view.source?.kind !== 'catalogue') return;
+		const { companion: _, ...source } = view.source;
+		const onCompanion = (id: string) => parts?.byId.get(id)?.object.userData.source === COMPANION_SOURCE;
+		view.source = value === 'cad' && source.version ? source : { ...source, companion: value };
+		view.hidden = view.hidden.filter((id) => !onCompanion(id));
+		view.isolated = view.isolated.filter((id) => !onCompanion(id));
+		if (view.selected && onCompanion(view.selected)) view.selected = null;
+		view.measure = view.measure.filter((ref) => !onCompanion(ref.part));
+		notice = '';
+	}
 	function openMeasure() {
 		measureOpen = true;
 		sectionOpen = shareOpen = false;
@@ -715,8 +739,9 @@
 			fallback = { label: link.label, text: link.text };
 		}
 	}
-	async function download(url: string) {
-		if (await host.openExternal(url, 'Download the STEP file')) return;
+	async function download(url: string, what = 'the STEP file') {
+		stepOpen = false;
+		if (await host.openExternal(url, `Download ${what}`)) return;
 		fallback = { label: 'STEP download', text: url };
 		shareOpen = true;
 		sectionOpen = false;
@@ -729,14 +754,14 @@
 				openShown = false;
 				return;
 			}
-			if (measuring && !sectionOpen && !shareOpen) {
+			if (measuring && !sectionOpen && !shareOpen && !stepOpen) {
 				// First Esc clears the measurement, the next closes the tool.
 				if (view.measure.length) view.measure = [];
 				else closeMeasure();
 				return;
 			}
 			view.selected = null;
-			sectionOpen = shareOpen = false;
+			sectionOpen = shareOpen = stepOpen = false;
 		}
 		if (e.key === 'f' && !e.metaKey && !e.ctrlKey && !e.altKey) viewer?.fit();
 		if (e.key === 'o' && !e.metaKey && !e.ctrlKey && !e.altKey) openShown = true;
@@ -792,13 +817,13 @@
 			{/if}
 		</div>
 		<div class="actions">
-			<button class="pill" onclick={() => ((openShown = !showOpen || !loadedKey), (shareOpen = sectionOpen = false))} title="Open a file (O)">
+			<button class="pill" onclick={() => ((openShown = !showOpen || !loadedKey), (shareOpen = sectionOpen = stepOpen = false))} title="Open a file (O)">
 				<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6.5V15a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 17 15V8a1.5 1.5 0 0 0-1.5-1.5H10L8.5 4.5h-4A1.5 1.5 0 0 0 3 6Z" /></svg>
 				<span class="label">Open</span>
 			</button>
 			{#if model}
 				<div class="pop">
-					<button class="pill" onclick={() => ((shareOpen = !shareOpen), (sectionOpen = false), (fallback = null))} aria-expanded={shareOpen}>
+					<button class="pill" onclick={() => ((shareOpen = !shareOpen), (sectionOpen = stepOpen = false), (fallback = null))} aria-expanded={shareOpen}>
 						<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M8.5 11.5a3.5 3.5 0 0 0 5 0l3-3a3.5 3.5 0 0 0-5-5l-1 1M11.5 8.5a3.5 3.5 0 0 0-5 0l-3 3a3.5 3.5 0 0 0 5 5l1-1" /></svg>
 						<span class="label">Share</span>
 					</button>
@@ -822,7 +847,25 @@
 						</div>
 					{/if}
 				</div>
-				{#if model.download}
+				{#if model.download && companionShown && catalogue}
+					{@const url = model.download}
+					{@const { track, revision } = companionShown}
+					{@const zipped = blobUrl(catalogue.servers[0], revision.step.sha256, 'zip')}
+					<div class="pop">
+						<button class="pill" onclick={() => ((stepOpen = !stepOpen), (shareOpen = sectionOpen = false))} aria-expanded={stepOpen} title="Download the STEP files">
+							<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M5.5 8.5 10 13l4.5-4.5M4 16.5h12" /></svg>
+							<span class="label">STEP</span>
+						</button>
+						{#if stepOpen}
+							<div class="menu" role="menu">
+								<button role="menuitem" onclick={() => download(url)}>{model.name} <small>The model's STEP file</small></button>
+								<button role="menuitem" onclick={() => download(zipped, `the ${track.label}'s STEP file`)}>
+									{track.label} {revision.id} <small>Its STEP file, zipped, {(revision.step.size / 1e6).toFixed(1)} MB</small>
+								</button>
+							</div>
+						{/if}
+					</div>
+				{:else if model.download}
 					{@const url = model.download}
 					<button class="pill" onclick={() => download(url)} title="Download the STEP file">
 						<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M5.5 8.5 10 13l4.5-4.5M4 16.5h12" /></svg>
@@ -853,6 +896,30 @@
 						{/each}
 					</ul>
 				</details>
+			{/if}
+			{#if picked?.model.companions && picked.version.slot !== undefined}
+				{@const track = picked.model.companions}
+				{@const choice = picked.companion}
+				<div class="notes companion">
+					{#if picked.version.slot === null}
+						<span class="title">{track.label}</span>
+						<span class="warn">The {track.label} does not line up with this version, so it shows as in CAD.</span>
+					{:else}
+						<label>
+							<span class="title">{track.label}</span>
+							<select class="version" value={choice.kind === 'revision' ? choice.revision.id : 'cad'} onchange={(e) => pickCompanion(e.currentTarget.value)}>
+								<option value="cad">As in CAD</option>
+								{#each track.revisions as revision (revision.id)}
+									<option value={revision.id}>{versionLabel(revision)}{revision.id === track.latest ? ' · latest' : ''}</option>
+								{/each}
+							</select>
+						</label>
+						<span>{choice.kind === 'revision' ? choice.revision.subject || track.source : `The ${track.label} exported with this version`}</span>
+						{#if companionFailed && choice.kind === 'revision' && companionFailed.id === choice.revision.id}
+							<span class="warn">{companionFailed.id} could not be fitted: {companionFailed.reason}</span>
+						{/if}
+					{/if}
+				</div>
 			{/if}
 			{#if selectedPart}
 				{@const part = selectedPart}
@@ -1223,6 +1290,27 @@
 		max-height: 140px;
 		overflow-y: auto;
 		overflow-wrap: anywhere;
+	}
+	.companion {
+		display: grid;
+		gap: 2px;
+		overflow-wrap: anywhere;
+	}
+	.companion label {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+	}
+	.companion .version {
+		flex: 1;
+		max-width: none;
+	}
+	.companion .title {
+		color: var(--text);
+		font-weight: 600;
+	}
+	.warn {
+		color: var(--accent-text);
 	}
 	.selection {
 		margin: 0 12px 10px;

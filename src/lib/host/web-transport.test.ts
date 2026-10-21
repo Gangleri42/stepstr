@@ -15,9 +15,9 @@ function respond(chunks: number[], headers: Record<string, string>, cors = false
 	vi.stubGlobal('fetch', async () => response);
 }
 
-async function progress() {
+async function progress(size?: number) {
 	const seen: (number | null)[] = [];
-	const bytes = await webTransport().url('https://files.example.com/part.step', (fraction) => seen.push(fraction));
+	const bytes = await webTransport().url('https://files.example.com/part.step', (fraction) => seen.push(fraction), undefined, size);
 	return { seen, size: bytes.length };
 }
 
@@ -43,6 +43,13 @@ describe('download progress', () => {
 	it('drops the fraction once the body runs past its length', async () => {
 		respond([2, 4, 4], { 'content-length': '5' });
 		expect(await progress()).toEqual({ seen: [0.4, null, null], size: 10 });
+	});
+
+	it('follows the size the caller knows, whatever the response says', async () => {
+		respond([4, 4, 2], { 'content-length': '3', 'content-type': 'text/plain; charset=utf-8' }, true);
+		expect(await progress(10)).toEqual({ seen: [0.4, 0.8, 1], size: 10 });
+		respond([4, 6], {});
+		expect(await progress(5)).toEqual({ seen: [0.8, null], size: 10 });
 	});
 
 	it('has none without a length', async () => {

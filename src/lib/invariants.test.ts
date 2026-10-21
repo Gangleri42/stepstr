@@ -14,6 +14,7 @@ import type { Host, Transport } from '$lib/host/host';
 import { TransportError } from '$lib/host/host';
 import { nappletTransport } from '$lib/host/napplet-transport';
 import { webTransport } from '$lib/host/web-transport';
+import { openPublished } from '$lib/open/published';
 import { loadSource } from '$lib/source/load';
 import type { NostrEventLike } from '$lib/source/nostr-files';
 import { sha256Hex } from '$lib/source/sha256';
@@ -96,6 +97,14 @@ describe('a link pinned to a sha256 opens those bytes or nothing', () => {
 		expect(sha256Hex((await loadSource(file, null, hostWith(webTransport()), () => {})).bytes)).toBe(PIN);
 		// A version the catalogue does not list opens other bytes than the link named, so it is named as missing.
 		expect(named('#/stand@fffffff?m=a.f1')).toMatchObject({ version: { id: 'ccc4444' }, missing: 'fffffff' });
+	});
+
+	it("and a site's published conversion only as the files the catalogue names", async () => {
+		const catalogue = fixtureCatalogue();
+		const files = { glb: { sha256: PIN, size: STEP.length }, measure: { sha256: sha256Hex(OTHER), size: OTHER.length } };
+		// A transport that checks nothing, and servers that send other bytes under these names.
+		const lying: Transport = { blob: async () => ({ bytes: OTHER, url: null }), url: async () => OTHER };
+		await expect(openPublished(hostWith(lying), catalogue, files, () => {}, new AbortController().signal)).rejects.toMatchObject({ reason: 'mismatch' });
 	});
 
 	it('and an unpinned link is pinned to the bytes it fetched', async () => {

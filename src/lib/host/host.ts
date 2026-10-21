@@ -17,8 +17,8 @@ export interface Transport {
 	 * when the transport knows it.
 	 */
 	blob(sha256: string, servers: string[], onProgress?: Progress, signal?: AbortSignal): Promise<{ bytes: Uint8Array; url: string | null }>;
-	/** The bytes at an https URL. */
-	url(url: string, onProgress?: Progress, signal?: AbortSignal): Promise<Uint8Array>;
+	/** The bytes at an https URL; `size`, when the caller knows it, is what the progress counts against. */
+	url(url: string, onProgress?: Progress, signal?: AbortSignal, size?: number): Promise<Uint8Array>;
 	/** A Nostr event by NIP-19 pointer, its signature checked; null when not found. Absent without relay access. */
 	event?(pointer: string): Promise<NostrEventLike | null>;
 	/** The Blossom servers a user lists (kind 10063), best first. */

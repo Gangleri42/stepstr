@@ -1,20 +1,23 @@
-// Opening a file up to its converted model: what this device kept of it, its bytes, the conversion. The app puts the
-// model on screen. A load counts only while its signal is not aborted, and that signal is the one check: a newer load
-// or Cancel aborts it, and from then on it reports no stage and gives no model.
+// Opening a file up to its converted model: what this device kept of it, the conversion its site published, its bytes,
+// the conversion. The app puts the model on screen. A load counts only while its signal is not aborted, and that signal
+// is the one check: a newer load or Cancel aborts it, and from then on it reports no stage and gives no model.
 import { ABOUT } from '$lib/about';
 import { jitOff } from '$lib/convert/jit';
 import type { Converted, ConvertProgress } from '$lib/convert/types';
 import type { Host } from '$lib/host/host';
 import type { RecentEntry } from '$lib/recent/types';
-import { loadSource, type Loaded } from '$lib/source/load';
+import { lastSegment, loadSource, type Loaded } from '$lib/source/load';
 import { addLocalFile, localFile } from '$lib/source/local';
 import { sourceKey, type FileSource } from '$lib/state/hash';
+import { listedStep, openPublished } from './published';
 
 /** What the app shows while a file opens; `note` is a line below the label. */
 export type Stage = { label: string; fraction: number | null; note?: string };
 
 /** Said under every stage of a conversion in a browser that runs without a JIT. */
 export const NO_JIT = `Heads up: JavaScript JIT is off for this site, so converting takes several times longer. Turning it on in the browser's site settings speeds it up.`;
+/** Said under the download and the conversion of a STEP file whose published conversion could not be had. */
+export const UNPUBLISHED = 'The published model could not be fetched, so the STEP file is converted here.';
 
 export type Opened = {
 	/** The converted model, or the one kept on this device. */
@@ -83,7 +86,6 @@ export function opener() {
 		const report = (stage: Stage) => {
 			if (!signal.aborted) onStage(stage);
 		};
-		const title = name ?? 'the file';
 		// What this device kept of a file pinned to its bytes: its entry, and the model this build's conversion made of
 		// it, which shows the file again without downloading or converting it.
 		const key = sourceKey(source);
@@ -101,8 +103,28 @@ export function opener() {
 			return { model: kept.model, file, kept: true, seen };
 		}
 
+		// A STEP file the site's catalogue lists, with the conversion it published for this build's conversion code.
+		const catalogue = host.catalogue;
+		const listed = pin && catalogue ? listedStep(catalogue, pin) : null;
+		const title = name ?? listed?.model.title ?? 'the file';
+		let unpublished: string | undefined;
+		if (pin && listed && catalogue && ABOUT.conversion && catalogue.conversion === ABOUT.conversion) {
+			const { step, files } = listed.version;
+			const label = `Downloading ${title}`;
+			report({ label, fraction: null });
+			try {
+				const model = await openPublished(host, catalogue, files, (fraction) => report({ label, fraction }), signal);
+				return { model, file: { name: name ?? lastSegment(step.url), sha256: pin, size: step.size, download: step.url }, kept: false, seen };
+			} catch {
+				// Whatever went wrong (no server has the files, a hash that does not match, data that does not parse), the
+				// STEP file still opens.
+				signal.throwIfAborted();
+				unpublished = UNPUBLISHED;
+			}
+		}
+
 		// Measured before the converter starts loading, whose compiling would slow the measurement down.
-		const note = jitOff() ? NO_JIT : undefined;
+		const note = [unpublished, jitOff() ? NO_JIT : undefined].filter(Boolean).join(' ') || undefined;
 		host.converter.prepare();
 		// A file from this device: its kept bytes are registered again, so loadSource finds them.
 		if (source.kind === 'blob' && !localFile(source.sha256) && host.recent?.file) {
@@ -110,8 +132,9 @@ export function opener() {
 			signal.throwIfAborted();
 			if (bytes) addLocalFile(name ?? seen?.name ?? 'model.step', bytes);
 		}
-		if (source.kind !== 'blob' || !localFile(source.sha256)) report({ label: `Downloading ${title}`, fraction: null });
-		const { bytes, ...file } = await loadSource(source, name, host, (fraction) => report({ label: `Downloading ${title}`, fraction }), signal);
+		const downloading = (fraction: number | null) => report({ label: `Downloading ${title}`, fraction, ...(unpublished ? { note: unpublished } : {}) });
+		if (source.kind !== 'blob' || !localFile(source.sha256)) downloading(null);
+		const { bytes, ...file } = await loadSource(source, name, host, downloading, signal, listed?.version.step.size);
 		signal.throwIfAborted();
 		let model = converted.get(file.sha256);
 		if (!model) {

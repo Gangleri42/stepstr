@@ -31,7 +31,7 @@ function checked(bytes: Uint8Array, sha256: string | undefined) {
 }
 
 /** The last part of a URL's path, decoded where it can be. */
-function lastSegment(url: string) {
+export function lastSegment(url: string) {
 	const segment = new URL(url).pathname.split('/').pop() ?? '';
 	try {
 		return decodeURIComponent(segment);
@@ -44,7 +44,8 @@ function lastSegment(url: string) {
 const final = (err: unknown) =>
 	(err instanceof DOMException && err.name === 'AbortError') || (err instanceof TransportError && (err.reason === 'too-large' || err.reason === 'unsupported-type'));
 
-export async function loadSource(source: FileSource, name: string | null, host: Host, onProgress: Progress, signal?: AbortSignal): Promise<Loaded> {
+/** `size` is the file's size when the caller knows it, so a download whose response does not say still shows how far it is. */
+export async function loadSource(source: FileSource, name: string | null, host: Host, onProgress: Progress, signal?: AbortSignal, size?: number): Promise<Loaded> {
 	const { transport } = host;
 	const finish = (bytes: Uint8Array, sha256: string, fallbackName: string, download: string | null): Loaded => {
 		const step = unwrapStep(bytes, name ?? fallbackName);
@@ -104,7 +105,7 @@ export async function loadSource(source: FileSource, name: string | null, host: 
 	}
 
 	if (source.kind === 'url') {
-		let bytes = await transport.url(source.url, onProgress, signal);
+		let bytes = await transport.url(source.url, onProgress, signal, size);
 		let download = source.url;
 		// A repository that keeps its CAD files in Git LFS hands out a pointer; the content lives elsewhere.
 		const pointer = lfsPointer(bytes);

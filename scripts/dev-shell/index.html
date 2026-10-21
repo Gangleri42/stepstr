@@ -124,18 +124,52 @@
 			};
 			requestAnimationFrame(tick);
 
-			// Paja's resource policy: bytes are classified by sniffing; only images, audio, video, fonts and UTF-8 text pass.
-			const sniff = (bytes) => {
-				const sig = [[0x89, 0x50, 0x4e, 0x47], [0xff, 0xd8, 0xff], [0x47, 0x49, 0x46, 0x38], [0x77, 0x4f, 0x46, 0x46], [0x77, 0x4f, 0x46, 0x32]];
-				const types = ['image/png', 'image/jpeg', 'image/gif', 'font/woff', 'font/woff2'];
-				for (let i = 0; i < sig.length; i++) if (sig[i].every((b, k) => bytes[k] === b)) return types[i];
-				if (bytes.includes(0)) return null;
+			// Paja's resource policy (@kehto/paja 0.24, classifyResourceBytes), Game Boy ROMs aside: bytes are classified by
+			// sniffing. Images, audio, video, fonts and UTF-8 text pass from anywhere and markup from nowhere; other bytes
+			// pass only from Blossom, whose hash was checked, as application/octet-stream.
+			const ascii = (bytes, start, end) => String.fromCharCode(...bytes.subarray(start, end));
+			const starts = (bytes, prefix) => prefix.every((b, i) => bytes[i] === b);
+			const media = (bytes) => {
+				if (starts(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return 'image/png';
+				if (starts(bytes, [0xff, 0xd8, 0xff])) return 'image/jpeg';
+				if (/^GIF8[79]a$/.test(ascii(bytes, 0, 6))) return 'image/gif';
+				if (ascii(bytes, 0, 4) === 'RIFF' && ascii(bytes, 8, 12) === 'WEBP') return 'image/webp';
+				if (ascii(bytes, 0, 4) === 'RIFF' && ascii(bytes, 8, 12) === 'WAVE') return 'audio/wav';
+				if (ascii(bytes, 0, 4) === 'OggS') return 'audio/ogg';
+				if (ascii(bytes, 0, 3) === 'ID3' || starts(bytes, [0xff, 0xfb])) return 'audio/mpeg';
+				if (starts(bytes, [0x1a, 0x45, 0xdf, 0xa3])) return 'video/webm';
+				if (ascii(bytes, 4, 8) === 'ftyp') return 'video/mp4';
+				if (ascii(bytes, 0, 4) === 'wOFF') return 'font/woff';
+				if (ascii(bytes, 0, 4) === 'wOF2') return 'font/woff2';
+				return null;
+			};
+			const markup = (text) => /^<(svg|\?xml|!doctype html|html|script)/.test(text.trimStart().toLowerCase());
+			const encodedMarkup = (bytes) => {
+				if (starts(bytes, [0xff, 0xfe, 0, 0]) || starts(bytes, [0, 0, 0xfe, 0xff]) || starts(bytes, [0x3c, 0, 0, 0]) || starts(bytes, [0, 0, 0, 0x3c])) return true;
+				const encoding = starts(bytes, [0xff, 0xfe]) || starts(bytes, [0x3c, 0]) ? 'utf-16le' : starts(bytes, [0xfe, 0xff]) || starts(bytes, [0, 0x3c]) ? 'utf-16be' : null;
+				return !!encoding && markup(new TextDecoder(encoding).decode(bytes));
+			};
+			/** The type Paja gives the bytes, 'blocked', or 'opaque' for bytes it passes from Blossom alone. */
+			const classify = (bytes) => {
+				const known = media(bytes);
+				if (known) return known;
+				if (markup(new TextDecoder().decode(bytes)) || encodedMarkup(bytes)) return 'blocked';
+				let text;
 				try {
-					new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-					return 'text/plain';
+					text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
 				} catch {
-					return null;
+					return 'opaque';
 				}
+				if (text.includes('\u0000')) return 'opaque';
+				if (/^[{[]/.test(text.trimStart())) {
+					try {
+						JSON.parse(text);
+						return 'application/json';
+					} catch {
+						// Not JSON after all: text.
+					}
+				}
+				return 'text/plain';
 			};
 			const fail = (code, message) => Object.assign(new Error(message), { code });
 			async function fetchBytes(url, servers) {
@@ -227,8 +261,9 @@
 							let mime = 'application/octet-stream';
 							if (parity) {
 								if (bytes.length > MAX) throw fail('too-large', `${bytes.length} bytes`);
-								mime = sniff(bytes);
-								if (!mime) throw fail('decode-failed', 'not an allowed type');
+								const kind = classify(bytes);
+								if (kind === 'blocked' || (kind === 'opaque' && !m.url.startsWith('blossom:'))) throw fail('decode-failed', 'not an allowed type');
+								mime = kind === 'opaque' ? 'application/octet-stream' : kind;
 							}
 							post({ type: 'resource.bytes.result', id: m.id, blob: new Blob([bytes], { type: mime }), mime });
 						} catch (err) {

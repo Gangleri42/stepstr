@@ -19,9 +19,12 @@ function bodySize(response: Response): number | null {
 	return length;
 }
 
-/** Reads a response body in chunks so the loading bar can follow: a fraction where the size is known, else null. */
-async function readWithProgress(response: Response, onProgress?: Progress): Promise<Uint8Array> {
-	let total = bodySize(response);
+/**
+ * Reads a response body in chunks so the loading bar can follow: a fraction where the size is known, from the caller
+ * or the response, else null.
+ */
+async function readWithProgress(response: Response, onProgress?: Progress, size?: number): Promise<Uint8Array> {
+	let total = size ?? bodySize(response);
 	if (!response.body) return new Uint8Array(await response.arrayBuffer());
 	const reader = response.body.getReader();
 	const chunks: Uint8Array[] = [];
@@ -44,7 +47,7 @@ async function readWithProgress(response: Response, onProgress?: Progress): Prom
 	return out;
 }
 
-async function get(url: string, onProgress?: Progress, signal?: AbortSignal) {
+async function get(url: string, onProgress?: Progress, signal?: AbortSignal, size?: number) {
 	let response: Response;
 	try {
 		response = await fetch(url, { credentials: 'omit', referrerPolicy: 'no-referrer', signal });
@@ -55,7 +58,7 @@ async function get(url: string, onProgress?: Progress, signal?: AbortSignal) {
 	}
 	if (response.status === 404) throw new TransportError('not-found', `${new URL(url).host} does not have this file`);
 	if (!response.ok) throw new TransportError('unreachable', `${new URL(url).host} answered ${response.status} ${response.statusText}`.trim());
-	return readWithProgress(response, onProgress);
+	return readWithProgress(response, onProgress, size);
 }
 
 export function webTransport(): Transport {

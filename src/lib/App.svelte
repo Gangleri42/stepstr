@@ -20,6 +20,7 @@
 	import type { MeasureStatus, MeasureTool, Outcome } from '$lib/viewer/measure/tool';
 	import type { Part, PartIndex } from '$lib/viewer/parts';
 	import { applyVisibility } from '$lib/viewer/parts';
+	import { applyFinishes } from '$lib/viewer/finishes';
 	import type { NamedView, RenderOptions, Viewer } from '$lib/viewer/scene';
 	import { title } from 'virtual:stepstr-site';
 
@@ -269,6 +270,9 @@
 			scene.setUp(wanted.up, false);
 			const index = await scene.loadBuffer(buffer as ArrayBuffer, () => !signal.aborted);
 			if (!index || signal.aborted) return;
+			// The finishes the catalogue gives this version's parts, before the first frame shows the model.
+			const finishes = listed?.version.finishes;
+			if (finishes?.length) scene.restyle((root) => applyFinishes(root, finishes));
 
 			// Pin the route to the bytes it showed, so its part ids and measurements keep their meaning. A catalogue model's
 			// route names the version the catalogue gave, by its id.

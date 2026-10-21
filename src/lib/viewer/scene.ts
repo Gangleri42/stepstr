@@ -76,6 +76,16 @@ function isPowerVR(gl: WebGLRenderingContext | WebGL2RenderingContext) {
 	return !!info && /PowerVR|Imagination/i.test(String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)));
 }
 
+/** Every material of a model's meshes and lines. */
+function materialsOf(model: THREE.Object3D) {
+	const materials = new Set<THREE.Material>();
+	model.traverse((object) => {
+		const material = (object as THREE.Mesh).material;
+		if (material) for (const one of [material].flat()) materials.add(one);
+	});
+	return materials;
+}
+
 /** The floor's normal before it is turned square to the up axis: a plane geometry faces +Z. */
 const PLANE_NORMAL = new THREE.Vector3(0, 0, 1);
 
@@ -144,6 +154,8 @@ export class Viewer {
 	#edges: THREE.LineBasicMaterial[] = [];
 	#highlight = new Map<THREE.Material, THREE.MeshStandardMaterial>();
 	#highlighted: { mesh: THREE.Mesh; material: THREE.Material }[] = [];
+	#highlightedPart: Part | null = null;
+	#cuts: Cut[] = [];
 	#accent = new THREE.Color('#e2561b');
 	#pointers = new Map<number, { x: number; y: number }>();
 	#multiTouch = false;
@@ -407,6 +419,35 @@ export class Viewer {
 		return this.parts;
 	}
 
+	/**
+	 * Changes the model on screen in place, such as its parts' finishes (finishes.ts), and treats its materials as a load
+	 * does: glass reflects as glass, the section's caps and planes follow the new materials, the highlight is drawn over
+	 * them, and the materials no mesh uses any more are freed.
+	 */
+	restyle(change: (root: THREE.Object3D) => void) {
+		const model = this.model;
+		if (!model) return;
+		const part = this.#highlightedPart;
+		this.highlight(null);
+		for (const tinted of this.#highlight.values()) tinted.dispose();
+		this.#highlight.clear();
+		const caps: THREE.Object3D[] = [];
+		model.traverse((object) => object.userData.cap && caps.push(object));
+		for (const cap of caps) cap.removeFromParent();
+		const before = materialsOf(model);
+		change(model.children[0]);
+		const after = materialsOf(model);
+		for (const material of before) if (!after.has(material)) material.dispose();
+		model.traverse((object) => {
+			const mesh = object as THREE.Mesh;
+			if (mesh.isMesh) reflectiveGlass(mesh.material as THREE.MeshStandardMaterial);
+		});
+		this.section.attach(model.children[0]);
+		this.setCuts(this.#cuts);
+		this.#targets = null;
+		this.highlight(part);
+	}
+
 	/** Frees a model that leaves the scene: its geometries, its materials (section caps included) and any extras. */
 	#release(model: THREE.Object3D, extra: Iterable<THREE.Material> = []) {
 		const materials = new Set<THREE.Material>(extra);
@@ -588,6 +629,7 @@ export class Viewer {
 	}
 
 	setCuts(cuts: Cut[]) {
+		this.#cuts = cuts;
 		this.section.set(cuts);
 		for (const [source, tinted] of this.#highlight) tinted.clippingPlanes = source.clippingPlanes;
 		this.requestRender();
@@ -603,6 +645,7 @@ export class Viewer {
 	highlight(part: Part | null) {
 		for (const { mesh, material } of this.#highlighted) mesh.material = material;
 		this.#highlighted = [];
+		this.#highlightedPart = part;
 		for (const mesh of part?.meshes ?? []) {
 			const source = mesh.material as THREE.MeshStandardMaterial;
 			let tinted = this.#highlight.get(source);

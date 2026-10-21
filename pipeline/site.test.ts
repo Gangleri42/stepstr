@@ -7,6 +7,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { CONVERTER, lacking } from '../test/prerequisites.ts';
+import { nappletRole } from '../src/lib/state/archetype.ts';
+import { readConfig } from './nostr/config.ts';
 import { NAPPLET_TEMPLATE } from './nostr/manifest.ts';
 import { sitePaths, STEPSTR_DIR } from './site.ts';
 
@@ -19,6 +21,42 @@ describe('sitePaths', () => {
 			napplet: '/srv/site/dist-napplet'
 		});
 		expect(sitePaths('..').dir).toBe(join(process.cwd(), '..'));
+	});
+});
+
+describe('a site\'s napplet role', () => {
+	it('is stepstr\'s own where the config names none', () => {
+		expect(nappletRole()).toEqual({
+			archetype: '3d-model',
+			convention: 'napplet:3d-model/open',
+			topics: ['napplet:3d-model/open', '3d-model:open'],
+			ready: '3d-model:ready',
+			params: ['url', 'sha256', 'servers', 'name', 'view', 'route'],
+			requires: ['inc', 'resource'],
+			optional: ['theme', 'link', 'outbox', 'fs', 'storage']
+		});
+	});
+
+	it('takes the archetype\'s topics, and stepstr\'s for what it leaves out', () => {
+		expect(nappletRole({ archetype: 'cad-viewer', optional: ['theme'] })).toMatchObject({
+			convention: 'napplet:cad-viewer/open',
+			topics: ['napplet:cad-viewer/open', 'cad-viewer:open'],
+			ready: 'cad-viewer:ready',
+			requires: ['inc', 'resource'],
+			optional: ['theme']
+		});
+	});
+
+	it('is checked when the config is read', () => {
+		const dir = mkdtempSync(join(tmpdir(), 'stepstr-config-'));
+		const stepstr = JSON.parse(readFileSync(sitePaths(STEPSTR_DIR).config, 'utf8'));
+		const path = join(dir, 'config.json');
+		try {
+			writeFileSync(path, JSON.stringify({ ...stepstr, napplet: { archetype: 'CAD viewer', param: ['model'], optional: 'theme' } }));
+			expect(() => readConfig(path)).toThrow(/napplet.archetype must be of \[a-z0-9-\]; napplet.param is no napplet setting; napplet.optional must be a list of words/);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });
 
@@ -50,26 +88,41 @@ describe.skipIf(lacking(CONVERTER))('a build for another site', () => {
 			site.config,
 			JSON.stringify({
 				id: 'other',
-				title: 'Other',
-				description: 'Another site.',
+				title: 'Other & co',
+				description: 'Another "site".',
 				pubkey: stepstr.pubkey,
 				relays: ['wss://relay.example.com'],
-				servers: ['https://blossom.example.com']
+				servers: ['https://blossom.example.com'],
+				napplet: { archetype: 'cad-viewer', params: ['model', 'version'] }
 			})
 		);
 		const before = [tree(own.build), tree(own.napplet)];
-		const env = { ...process.env, STEPSTR_SITE: dir };
+		// Vitest's NODE_ENV would make development builds.
+		const env = { ...process.env, NODE_ENV: 'production', STEPSTR_SITE: dir };
 		for (const script of ['build', 'build:napplet']) execFileSync('npm', ['run', script], { cwd: STEPSTR_DIR, env, stdio: 'pipe' });
 		expect([tree(own.build), tree(own.napplet)]).toEqual(before);
 
-		const scripts = readdirSync(join(site.build, '_app/immutable/nodes')).map((name) => readFileSync(join(site.build, '_app/immutable/nodes', name), 'utf8')).join('\n');
+		const web = readFileSync(join(site.build, 'index.html'), 'utf8');
+		expect(web).toContain('<title>Open a STEP file · Other &amp; co</title>');
+		expect(web).toContain('<meta name="description" content="Another &quot;site&quot;." />');
+		expect(JSON.parse(readFileSync(join(site.build, 'manifest.webmanifest'), 'utf8'))).toMatchObject({ name: 'Other & co', description: 'Another "site".' });
+		const scripts = Object.keys(tree(join(site.build, '_app'))!).map((path) => readFileSync(join(site.build, '_app', path), 'utf8')).join('\n');
 		expect(scripts).toContain('https://blossom.example.com');
 		expect(scripts).not.toContain(stepstr.servers[1]);
 
 		const page = readFileSync(join(site.napplet, 'index.html'), 'utf8');
+		expect(page).toContain('<title>Other &amp; co</title>');
 		expect(page).toContain('<meta name="napplet-id" content="other"');
+		expect(page).toContain('<meta name="napplet-intent" content="napplet:cad-viewer/open model version"');
+		expect(page).toContain('<meta name="napplet-requires" content="inc resource"');
 		expect(page).toContain('<meta name="napplet-server" content="https://blossom.example.com"');
+		// The page listens on the site's topics.
+		expect(page).toContain('cad-viewer:ready');
+		expect(page).not.toContain('3d-model:ready');
 		const manifest: { tags: string[][] } = JSON.parse(readFileSync(join(site.napplet, NAPPLET_TEMPLATE), 'utf8'));
-		expect(manifest.tags.filter((t) => t[0] === 'd')).toEqual([['d', 'other']]);
+		const tags = (name: string) => manifest.tags.filter((t) => t[0] === name);
+		expect(tags('d')).toEqual([['d', 'other']]);
+		expect(tags('title')).toEqual([['title', 'Other & co']]);
+		expect(tags('z')).toEqual([['z', 'cad-viewer']]);
 	}, 300_000);
 });

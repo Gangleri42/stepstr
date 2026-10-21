@@ -11,13 +11,13 @@ import { aboutModule } from './pipeline/about.ts';
 import { CONVERTER_FILE, converterText } from './pipeline/converter-file.ts';
 import { readConfig } from './pipeline/nostr/config.ts';
 import { siteOrigin } from './pipeline/nostr/nsite.ts';
-import { SITE } from './pipeline/site.ts';
-import { ARCHETYPE, CONVENTION, INTENT_PARAMS, OPTIONAL, REQUIRES } from './src/lib/state/archetype.ts';
+import { escapeAttribute, SITE, siteModule } from './pipeline/site.ts';
+import { nappletRole } from './src/lib/state/archetype.ts';
 
 const at = (path: string) => fileURLToPath(new URL(path, import.meta.url));
-const escapeAttribute = (text: string) => text.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 const site = readConfig(SITE.config);
+const role = nappletRole(site.napplet);
 const converterPath = process.env.CONVERTER_WASM ?? at('./converter/dist/converter.wasm');
 
 export { CONVERTER_FILE };
@@ -53,15 +53,15 @@ function stepstr(): Plugin {
 			const head = [
 				meta('description', site.description),
 				meta('napplet-id', site.id),
-				meta('napplet-archetype', ARCHETYPE),
-				meta('napplet-intent', [CONVENTION, ...INTENT_PARAMS].join(' ')),
-				meta('napplet-requires', REQUIRES.join(' ')),
-				meta('napplet-optional', OPTIONAL.join(' ')),
+				meta('napplet-archetype', role.archetype),
+				meta('napplet-intent', [role.convention, ...role.params].join(' ')),
+				meta('napplet-requires', role.requires.join(' ')),
+				meta('napplet-optional', role.optional.join(' ')),
 				...(site.source ? [meta('napplet-source', site.source)] : []),
 				...site.servers.map((server) => meta('napplet-server', server)),
 				`\t<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,${encodeURIComponent(icon)}" />\n`
 			];
-			return html.replace('</head>', `${head.join('')}\t</head>`);
+			return html.replace('<title></title>', `<title>${escapeAttribute(site.title)}</title>`).replace('</head>', `${head.join('')}\t</head>`);
 		},
 		load(source) {
 			if (source !== resolved) return null;
@@ -125,6 +125,7 @@ export default defineConfig({
 	},
 	plugins: [
 		aboutModule(converterPath),
+		siteModule(),
 		stepstr(),
 		threeNoNetwork(),
 		svelte({ configFile: false, preprocess: vitePreprocess(), compilerOptions: { runes: true } }),
@@ -134,8 +135,8 @@ export default defineConfig({
 			nappletType: site.id,
 			title: site.title,
 			description: site.description,
-			requires: REQUIRES,
-			archetypes: [{ slug: ARCHETYPE, convention: CONVENTION }],
+			requires: role.requires,
+			archetypes: [{ slug: role.archetype, convention: role.convention }],
 			artifactMode: 'single-file'
 		})
 	],

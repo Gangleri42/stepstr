@@ -1,6 +1,7 @@
 // What the publisher needs to know about the site: .nsite/config.json is the single source of relay and server lists,
 // shared with the napplet build (vite.napplet.config.ts) and readable by ngit's nsite publisher as a fallback.
 import { readFileSync } from 'node:fs';
+import type { NappletConfig } from '../../src/lib/state/archetype.ts';
 import { isSiteId, SITE_ID_RULE } from './nsite.ts';
 
 export type SiteConfig = {
@@ -24,6 +25,8 @@ export type SiteConfig = {
 	servers: string[];
 	/** nsite gateways, the first one for the links the tools print; nsite.lol when there are none. */
 	gatewayHostnames?: string[];
+	/** The napplet's role, where it is not stepstr's own (src/lib/state/archetype.ts). */
+	napplet?: NappletConfig;
 };
 
 /** The config as read: the lists it may leave out are there. */
@@ -74,6 +77,12 @@ export function readConfig(path: string): Config {
 	if (!config.servers?.length || config.servers.some((s) => !/^https?:\/\//.test(s))) problems.push('servers must be a non-empty list of http(s):// URLs');
 	if (!config.title) problems.push('title is required');
 	if (config.url !== undefined && !/^https:\/\/[^/\s]+$/.test(config.url)) problems.push('url must be https:// and a host, with no path');
+	const { archetype, ...lists } = config.napplet ?? {};
+	if (archetype !== undefined && !/^[a-z0-9-]+$/.test(archetype)) problems.push('napplet.archetype must be of [a-z0-9-]');
+	for (const [name, list] of Object.entries(lists)) {
+		if (!['topics', 'params', 'requires', 'optional'].includes(name)) problems.push(`napplet.${name} is no napplet setting`);
+		else if (!Array.isArray(list) || list.some((item) => typeof item !== 'string' || !/^\S+$/.test(item))) problems.push(`napplet.${name} must be a list of words`);
+	}
 	if (problems.length) throw new Error(`${path}: ${problems.join('; ')}`);
 	config.servers = config.servers.map((s) => s.replace(/\/+$/, ''));
 	return { ...config, archiveRelays: config.archiveRelays, gatewayHostnames: config.gatewayHostnames?.length ? config.gatewayHostnames : ['nsite.lol'] };

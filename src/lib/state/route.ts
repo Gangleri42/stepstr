@@ -1,11 +1,14 @@
 // The hash grammar is the viewer's route (see hash.ts). Outside a URL, a napplet is opened with a NAP-INTENT payload on
-// the 3d-model convention: string fields any napplet of that role can read (url, sha256, servers, name, view) and
-// `route`, stepstr's own full route, which wins when it is valid. Runtimes turn a convention URI's query into it.
+// its site's convention, 3d-model for stepstr (state/archetype.ts): string fields any napplet of that role can read
+// (url, sha256, servers, name, view) and `route`, stepstr's own full route, which wins when it is valid. Runtimes turn a
+// convention URI's query into it.
 import { resolveLink } from '$lib/source/links';
-import { CONVENTION, OPEN_TOPICS, READY_TOPIC } from './archetype';
+import { role } from 'virtual:stepstr-site';
 import { decode, encode, isRoute, type ViewState } from './hash';
 
-export { CONVENTION, OPEN_TOPICS, READY_TOPIC };
+export const CONVENTION = role.convention;
+export const OPEN_TOPICS = role.topics;
+export const READY_TOPIC = role.ready;
 
 /** A route in the hash grammar with its leading "#", or null when the text is not one. */
 export function normalizeRoute(text: unknown): string | null {

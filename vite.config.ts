@@ -4,7 +4,8 @@ import adapter from '@sveltejs/adapter-static';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 import { aboutModule } from './pipeline/about.ts';
-import { SITE, siteModule } from './pipeline/site.ts';
+import { readConfig } from './pipeline/nostr/config.ts';
+import { escapeAttribute, SITE, siteModule } from './pipeline/site.ts';
 
 // SvelteKit stamps the build into _app/version.json; the last commit that touched the app, instead of the clock,
 // keeps two builds of the same source byte-identical, which is how the Nostr publisher knows nothing changed.
@@ -16,6 +17,9 @@ const commit = (() => {
 		return 'dev';
 	}
 })();
+
+// The site's description for src/app.html, which SvelteKit fills in from the public environment as it is: escaped here.
+process.env.PUBLIC_SITE_DESCRIPTION = escapeAttribute(readConfig(SITE.config).description);
 
 export default defineConfig({
 	// The dev server hands the Worker the converter from converter/dist.

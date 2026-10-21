@@ -14,8 +14,8 @@ const worker = self as unknown as ServiceWorkerGlobalScope;
 const CACHE = `stepstr-${version}`;
 const ASSETS = [...build, ...files, ...prerendered];
 const PATHS = new Set(ASSETS);
-/** The page itself; the site has one, prerendered at the root of its base path. */
-const PAGE = prerendered[0];
+/** The page itself; the site has one, prerendered at the root of its base path beside the web app manifest. */
+const PAGE = prerendered.find((path) => !path.endsWith('.webmanifest'));
 
 worker.addEventListener('install', (event) => {
 	event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS)));

@@ -4,6 +4,7 @@
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Plugin } from 'vite';
+import { nappletRole } from '../src/lib/state/archetype.ts';
 import { readConfig } from './nostr/config.ts';
 
 export type SitePaths = {
@@ -26,13 +27,24 @@ export function sitePaths(dir: string): SitePaths {
 
 export const SITE = sitePaths(process.env.STEPSTR_SITE || STEPSTR_DIR);
 
-/** The site's config as the module virtual:stepstr-site, for the web page. */
+export const escapeAttribute = (text: string) => text.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+/**
+ * The module virtual:stepstr-site, which both builds generate: what the site is called, how it describes itself, its
+ * Blossom servers and the napplet's role.
+ */
 export function siteModule(): Plugin {
 	const id = 'virtual:stepstr-site';
 	const resolved = `\0${id}`;
+	const exported = () => {
+		const { title, description, servers, napplet } = readConfig(SITE.config);
+		return Object.entries({ title, description, servers, role: nappletRole(napplet) })
+			.map(([name, value]) => `export const ${name} = ${JSON.stringify(value)};`)
+			.join('\n');
+	};
 	return {
 		name: 'stepstr-site',
 		resolveId: (source) => (source === id ? resolved : undefined),
-		load: (loading) => (loading === resolved ? `export default ${JSON.stringify(readConfig(SITE.config))};` : undefined)
+		load: (loading) => (loading === resolved ? exported() : undefined)
 	};
 }

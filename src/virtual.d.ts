@@ -4,8 +4,10 @@ declare module 'virtual:stepstr-about' {
 	export default about;
 }
 
-// The site's .nsite/config.json, which the web build generates (pipeline/site.ts).
+// The site's name, description, servers and napplet role, which both Vite configs generate (pipeline/site.ts).
 declare module 'virtual:stepstr-site' {
-	const site: { servers: string[] };
-	export default site;
+	export const title: string;
+	export const description: string;
+	export const servers: string[];
+	export const role: import('./lib/state/archetype').NappletRole;
 }

@@ -10,7 +10,7 @@ import { CONVERTER_FILE } from '../pipeline/converter-file.ts';
 import { readConfig } from '../pipeline/nostr/config.ts';
 import { NAPPLET_TEMPLATE } from '../pipeline/nostr/manifest.ts';
 import { SITE } from '../pipeline/site.ts';
-import { ARCHETYPE, CONVENTION, INTENT_PARAMS, OPTIONAL, REQUIRES } from '../src/lib/state/archetype.ts';
+import { nappletRole } from '../src/lib/state/archetype.ts';
 import { CONVERTER, lacking } from '../test/prerequisites.ts';
 
 const dir = SITE.napplet;
@@ -69,15 +69,17 @@ describe.skipIf(!built)('napplet artefact', () => {
 
 	it('declares in its head what the manifest says', () => {
 		const config = readConfig(SITE.config);
+		const role = nappletRole(config.napplet);
 		expect(markup).toContain(`<meta name="napplet-id" content="${config.id}"`);
-		expect(markup).toContain(`<meta name="napplet-requires" content="${REQUIRES.join(' ')}"`);
+		expect(markup).toContain(`<meta name="napplet-requires" content="${role.requires.join(' ')}"`);
 		expect(manifest.kind).toBe(35129);
 		expect(manifest.content).toBe(config.description);
 		expect(tags('d')).toEqual([['d', config.id]]);
-		expect(tags('z')).toEqual([['z', ARCHETYPE]]);
-		expect(tags('i')).toEqual([['i', CONVENTION, ...INTENT_PARAMS]]);
-		expect(tags('R').map((t) => t[1])).toEqual(REQUIRES);
-		expect(tags('O').map((t) => t[1])).toEqual(OPTIONAL);
+		expect(tags('title')).toEqual([['title', config.title]]);
+		expect(tags('z')).toEqual([['z', role.archetype]]);
+		expect(tags('i')).toEqual([['i', role.convention, ...role.params]]);
+		expect(tags('R').map((t) => t[1])).toEqual(role.requires);
+		expect(tags('O').map((t) => t[1])).toEqual(role.optional);
 		expect(tags('server').map((t) => t[1])).toEqual(config.servers);
 	});
 

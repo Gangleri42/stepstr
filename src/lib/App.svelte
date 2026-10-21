@@ -20,6 +20,7 @@
 	import type { Part, PartIndex } from '$lib/viewer/parts';
 	import { applyVisibility } from '$lib/viewer/parts';
 	import type { NamedView, RenderOptions, Viewer } from '$lib/viewer/scene';
+	import { title } from 'virtual:stepstr-site';
 
 	let { host }: { host: Host } = $props();
 
@@ -608,7 +609,7 @@
 
 <svelte:window onkeydown={onKey} onpaste={onPaste} />
 <svelte:head>
-	<title>{model?.name ?? view.name ?? 'Open a STEP file'} · stepstr</title>
+	<title>{model?.name ?? view.name ?? 'Open a STEP file'} · {title}</title>
 </svelte:head>
 
 <main
@@ -628,7 +629,7 @@
 	<header>
 		<div class="brand">
 			<span class="mark" aria-hidden="true">{@html mark}</span>
-			<span class="name">stepstr</span>
+			<span class="name">{title}</span>
 			{#if model}
 				<span class="file" title={model.name}>{model.name}</span>
 			{/if}

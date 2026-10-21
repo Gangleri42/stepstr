@@ -3,6 +3,7 @@
 	import { dev } from '$app/environment';
 	import { base } from '$app/paths';
 	import '$lib/styles/tokens.css';
+	import { title } from 'virtual:stepstr-site';
 
 	let { children } = $props();
 
@@ -19,7 +20,7 @@
 </script>
 
 <svelte:head>
-	<title>stepstr</title>
+	<title>{title}</title>
 </svelte:head>
 
 {@render children()}

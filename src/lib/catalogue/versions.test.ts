@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { decode } from '$lib/state/hash';
 import { fixtureCatalogue } from './fixture';
-import { findVersion, resolveModel, type CatalogueSource } from './versions';
+import { findVersion, resolveModel, versionLabel, type CatalogueSource } from './versions';
 
 const catalogue = fixtureCatalogue();
 const stand = catalogue.models.stand;
@@ -20,6 +20,14 @@ describe('which version a route names', () => {
 		expect(findVersion(stand, '4444')).toBeUndefined();
 		expect(findVersion(stand, '41')).toBeUndefined();
 		expect(findVersion(stand, undefined)).toBeUndefined();
+	});
+});
+
+describe('a version in the picker', () => {
+	it('is labelled by id and day, in UTC', () => {
+		expect(versionLabel(stand.versions[0])).toBe('ccc4444 · 14 Oct');
+		expect(versionLabel({ ...stand.versions[0], date: '2026-10-14T23:30:00-02:00' })).toBe('ccc4444 · 15 Oct');
+		expect(versionLabel({ ...stand.versions[0], date: '' })).toBe('ccc4444');
 	});
 });
 

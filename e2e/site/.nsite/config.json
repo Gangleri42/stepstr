@@ -1,0 +1,8 @@
+{
+	"id": "catalogue",
+	"title": "Catalogue test",
+	"description": "A site with a catalogue, for the browser tests.",
+	"pubkey": "0000000000000000000000000000000000000000000000000000000000000001",
+	"relays": ["wss://relay.example.com"],
+	"servers": ["https://blossom.example.com"]
+}

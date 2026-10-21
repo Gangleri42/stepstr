@@ -4,6 +4,7 @@ node_modules
 /.svelte-kit
 /build
 /dist-napplet
+/e2e/site/build
 
 # OS and editors
 .DS_Store

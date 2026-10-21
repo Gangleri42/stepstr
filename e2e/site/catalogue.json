@@ -1,0 +1,83 @@
+{
+	"version": 1,
+	"conversion": "0000000000000000000000000000000000000000000000000000000000000000",
+	"servers": [
+		"https://blossom.example.com"
+	],
+	"home": "lamp",
+	"models": {
+		"lamp": {
+			"title": "Lamp",
+			"versions": [
+				{
+					"id": "aaaaaaa",
+					"commit": "aaaaaaa000000000000000000000000000000000",
+					"date": "2026-10-14",
+					"subject": "Round the corners",
+					"step": {
+						"sha256": "9380f4da945e7706ef03095d83102248196bef3add5bd0c72570ca124dcaa5f1",
+						"size": 5053446,
+						"url": "https://raw.githubusercontent.com/Gangleri42/sh-hardware/23b847f7e1aa74086b380d3f92700685dd36e0e6/seed/Seed-v15.step"
+					},
+					"files": {
+						"glb": {
+							"sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+							"size": 460000
+						},
+						"measure": {
+							"sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+							"size": 900000
+						}
+					}
+				},
+				{
+					"id": "bbbbbbb",
+					"commit": "bbbbbbb000000000000000000000000000000000",
+					"date": "2026-10-07",
+					"subject": "Widen the slot",
+					"step": {
+						"sha256": "9380f4da945e7706ef03095d83102248196bef3add5bd0c72570ca124dcaa5f1",
+						"size": 5053446,
+						"url": "https://raw.githubusercontent.com/Gangleri42/sh-hardware/23b847f7e1aa74086b380d3f92700685dd36e0e6/seed/Seed-v15.step"
+					},
+					"files": {
+						"glb": {
+							"sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+							"size": 460000
+						},
+						"measure": {
+							"sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+							"size": 900000
+						}
+					}
+				}
+			]
+		},
+		"twin": {
+			"title": "Twin",
+			"versions": [
+				{
+					"id": "ccccccc",
+					"commit": "ccccccc000000000000000000000000000000000",
+					"date": "2026-10-01",
+					"subject": "Copy the lamp",
+					"step": {
+						"sha256": "9380f4da945e7706ef03095d83102248196bef3add5bd0c72570ca124dcaa5f1",
+						"size": 5053446,
+						"url": "https://raw.githubusercontent.com/Gangleri42/sh-hardware/23b847f7e1aa74086b380d3f92700685dd36e0e6/seed/Seed-v15.step"
+					},
+					"files": {
+						"glb": {
+							"sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+							"size": 460000
+						},
+						"measure": {
+							"sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+							"size": 900000
+						}
+					}
+				}
+			]
+		}
+	}
+}

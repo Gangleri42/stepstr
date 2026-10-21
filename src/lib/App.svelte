@@ -2,7 +2,7 @@
 	import { onMount, untrack } from 'svelte';
 	import mark from '../../brand/icon.svg?raw';
 	import { ABOUT } from '$lib/about';
-	import { resolveModel, type Resolved } from '$lib/catalogue/versions';
+	import { resolveModel, versionLabel, type Resolved } from '$lib/catalogue/versions';
 	import type { Converted } from '$lib/convert/types';
 	import type { Host, ShareLink } from '$lib/host/host';
 	import type { MeasureData } from '$lib/measure/format';
@@ -88,6 +88,8 @@
 		const found = fileOf(source);
 		return found && sourceKey(found.file);
 	};
+	/** The catalogue model the route names, as the catalogue resolves it, for the picker. */
+	const picked = $derived(view.source?.kind === 'catalogue' ? (fileOf(view.source)?.listed ?? null) : null);
 	/** What a link to a version the catalogue does not list is told: it shows other bytes than it named. */
 	const gone = ({ model, missing }: Resolved) => `The catalogue lists no version ${missing} of ${model.title}, so the latest opened.`;
 	/**
@@ -597,6 +599,22 @@
 		const at = UP_AXES.indexOf(view.up);
 		view.up = UP_AXES[(at + (back ? UP_AXES.length - 1 : 1)) % UP_AXES.length];
 	}
+	/** Opens a catalogue model at its latest version; the model on screen at its latest stays as it is. */
+	function pickModel(name: string) {
+		if (view.source?.kind === 'catalogue' && view.source.model === name && picked?.version === picked?.model.versions[0]) return;
+		const next = { ...defaultState({ kind: 'catalogue', model: name }), edges: view.edges, ortho: view.ortho };
+		failure = null;
+		notice = '';
+		if (keyOf(next.source) === loadedKey) pinShown(next);
+		view = next;
+	}
+	/** Another version of the model on screen; "latest" is the newest the catalogue lists. Measured items stay with theirs. */
+	function pickVersion(value: string) {
+		if (view.source?.kind !== 'catalogue' || !picked) return;
+		view.source = { ...view.source, version: value === 'latest' ? picked.model.versions[0].id : value };
+		view.measure = [];
+		notice = '';
+	}
 	function openMeasure() {
 		measureOpen = true;
 		sectionOpen = shareOpen = false;
@@ -674,8 +692,23 @@
 	<header>
 		<div class="brand">
 			<span class="mark" aria-hidden="true">{@html mark}</span>
-			<span class="name">{title}</span>
-			{#if model}
+			<span class="name" class:beside={!!catalogue}>{title}</span>
+			{#if catalogue}
+				<nav class="models" aria-label="Model">
+					{#each Object.entries(catalogue.models) as [name, entry] (name)}
+						{@const on = view.source?.kind === 'catalogue' && view.source.model === name}
+						<button class:on aria-pressed={on} onclick={() => pickModel(name)}>{entry.title}</button>
+					{/each}
+				</nav>
+			{/if}
+			{#if picked}
+				<select class="version" aria-label="Version" value={view.source?.kind === 'catalogue' && view.source.version ? picked.version.id : 'latest'} onchange={(e) => pickVersion(e.currentTarget.value)}>
+					<option value="latest">latest</option>
+					{#each picked.model.versions as version (version.id)}
+						<option value={version.id}>{versionLabel(version)}</option>
+					{/each}
+				</select>
+			{:else if model}
 				<span class="file" title={model.name}>{model.name}</span>
 			{/if}
 		</div>
@@ -876,11 +909,13 @@
 		touch-action: none;
 		outline: none;
 	}
-	button {
+	button,
+	select {
 		font: inherit;
 		color: var(--text);
 	}
 	button:focus-visible,
+	select:focus-visible,
 	input:focus-visible {
 		outline: 2px solid var(--accent);
 		outline-offset: 1px;
@@ -950,6 +985,39 @@
 		font-size: 14px;
 		letter-spacing: 0.02em;
 		padding-right: 4px;
+	}
+	.models {
+		display: flex;
+		gap: 2px;
+	}
+	.models button {
+		border: 0;
+		background: none;
+		padding: 6px 10px;
+		border-radius: 8px;
+		font-weight: 600;
+		font-size: 13px;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--muted);
+		cursor: pointer;
+		white-space: nowrap;
+	}
+	.models button.on {
+		color: var(--text);
+		background: var(--hover);
+	}
+	.version {
+		border: 0;
+		background: none;
+		color: var(--muted);
+		padding: 6px 4px;
+		border-radius: 8px;
+		cursor: pointer;
+		font-size: 13px;
+		font-variant-numeric: tabular-nums;
+		min-width: 0;
+		max-width: 150px;
 	}
 	.file {
 		color: var(--muted);
@@ -1290,7 +1358,8 @@
 	@media (max-width: 760px) {
 		.label,
 		.views,
-		.tool span {
+		.tool span,
+		.name.beside {
 			display: none;
 		}
 		.pill {
@@ -1330,6 +1399,12 @@
 		}
 		.file {
 			max-width: 120px;
+		}
+		.models button {
+			padding: 6px 7px;
+		}
+		.version {
+			max-width: 88px;
 		}
 		.actions {
 			gap: 4px;

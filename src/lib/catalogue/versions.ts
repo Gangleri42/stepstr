@@ -21,6 +21,13 @@ export function findVersion(model: CatalogueModel, version: string | undefined):
 	return model.versions.find((v) => version.startsWith(v.id));
 }
 
+/** "aaaaaaa · 14 Oct" for the version picker: the id and the commit's day, in UTC. */
+export function versionLabel(version: CatalogueVersion) {
+	const date = new Date(version.date);
+	const day = Number.isNaN(date.getTime()) ? '' : ` · ${date.getUTCDate()} ${date.toLocaleString('en', { month: 'short', timeZone: 'UTC' })}`;
+	return `${version.id}${day}`;
+}
+
 /** The version a catalogue source opens and its STEP file; null for a model the catalogue does not list. */
 export function resolveModel(catalogue: Catalogue, source: CatalogueSource): Resolved | null {
 	const model = Object.hasOwn(catalogue.models, source.model) ? catalogue.models[source.model] : undefined;

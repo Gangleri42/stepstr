@@ -107,6 +107,11 @@
 		const companion = companionParam(listed.companion);
 		return { ...source, version: listed.version.id, ...(companion ? { companion } : {}) };
 	}
+	/**
+	 * A route to a catalogue model's newest version, whichever that is when the link is opened, in this view: the parts
+	 * and the camera, but no measured items, which name faces of this version's bytes, and no companion revision.
+	 */
+	const latestRoute = (state: ViewState, model: string) => encode({ ...state, source: { kind: 'catalogue', model }, measure: [] });
 	/** The catalogue model the route names, as the catalogue resolves it, for the picker. */
 	const picked = $derived(view.source?.kind === 'catalogue' ? (fileOf(view.source)?.listed ?? null) : null);
 	/** The companion revision in the slot of the model on screen, and one that was asked for and could not be fitted. */
@@ -730,10 +735,11 @@
 	function swapMeasure(from: MeasureRef, to: MeasureRef) {
 		view.measure = view.measure.map((ref) => (sameRef(ref, from) ? to : ref));
 	}
-	async function share(link: ShareLink) {
+	/** `group` tells a catalogue model's two sets of links apart: to this version, and to the latest. */
+	async function share(link: ShareLink, group?: 'this' | 'latest') {
 		fallback = null;
 		if (await host.copy(link.text)) {
-			copied = link.id;
+			copied = group ? `${group} ${link.id}` : link.id;
 			setTimeout(() => (copied = null), 1600);
 		} else {
 			fallback = { label: link.label, text: link.text };
@@ -830,14 +836,26 @@
 					{#if shareOpen}
 						{@const links = host.shareLinks(encode(view))}
 						<div class="menu" role="menu">
-							{#if model.local}
-								<p>This file is only on this device: a link opens it for someone else once the file is on a Blossom server.</p>
+							{#if view.source?.kind === 'catalogue'}
+								{@const latest = host.shareLinks(latestRoute(view, view.source.model))}
+								<p>This version: the link keeps it, with its parts, cuts, explode, camera and measurements.</p>
+								{#each links as link (link.id)}
+									<button role="menuitem" onclick={() => share(link, 'this')}>{copied === `this ${link.id}` ? 'Copied' : link.label} <small>{link.hint}</small></button>
+								{/each}
+								<p>Always the latest: the link opens the newest version in this view, without measurements.</p>
+								{#each latest as link (link.id)}
+									<button role="menuitem" onclick={() => share(link, 'latest')}>{copied === `latest ${link.id}` ? 'Copied' : link.label} <small>{link.hint}</small></button>
+								{/each}
 							{:else}
-								<p>The link keeps the file, parts, cuts, explode, camera and measurements.</p>
+								{#if model.local}
+									<p>This file is only on this device: a link opens it for someone else once the file is on a Blossom server.</p>
+								{:else}
+									<p>The link keeps the file, parts, cuts, explode, camera and measurements.</p>
+								{/if}
+								{#each links as link (link.id)}
+									<button role="menuitem" onclick={() => share(link)}>{copied === link.id ? 'Copied' : link.label} <small>{link.hint}</small></button>
+								{/each}
 							{/if}
-							{#each links as link (link.id)}
-								<button role="menuitem" onclick={() => share(link)}>{copied === link.id ? 'Copied' : link.label} <small>{link.hint}</small></button>
-							{/each}
 							{#if fallback}
 								<label class="fallback">
 									<small>Copying is not allowed here. {fallback.label}:</small>

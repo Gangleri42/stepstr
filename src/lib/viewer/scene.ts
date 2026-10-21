@@ -377,6 +377,7 @@ export class Viewer {
 		this.#edges = [];
 		this.#highlight.clear();
 		this.#highlighted = [];
+		this.#highlightedPart = null;
 		const edgeMaterials = new Map<THREE.Material, THREE.LineBasicMaterial>();
 		this.model.traverse((object) => {
 			const line = object as THREE.LineSegments;

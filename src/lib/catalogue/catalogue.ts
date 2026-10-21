@@ -48,6 +48,8 @@ export type CompanionTrack = {
 	latest: string | null;
 	/** Newest first. */
 	revisions: CompanionRevision[];
+	/** What the site says about the track that the files cannot: why its newest revision is not listed, say. */
+	notes?: string[];
 };
 
 export type CompanionRevision = {
@@ -59,6 +61,8 @@ export type CompanionRevision = {
 	step: Blob;
 	files: { glb: Blob; measure: Blob };
 	finishes?: Finish[];
+	/** What the site says about this revision: what was changed to build it, which parts it leaves out. */
+	notes?: string[];
 };
 
 /**
@@ -123,6 +127,20 @@ const list = (check: Shape[string], nonEmpty = false) => (value: unknown, at: st
 	if (!Array.isArray(value) || (nonEmpty && !value.length)) return void problems.push(`${at} must be a${nonEmpty ? ' non-empty' : ''} list`);
 	value.forEach((item, i) => check(item, `${at}[${i}]`, problems));
 };
+/** A site's notes: a few short plain sentences, each on one line, none twice. */
+const NOTES = { count: 8, length: 300 };
+const note = (value: unknown, at: string, problems: Problems) => {
+	// No control characters, line breaks included: a note shows as one line of plain text.
+	if (typeof value !== 'string' || !/\S/.test(value) || /[\p{Cc}\u2028\u2029]/u.test(value)) problems.push(`${at} must be a non-empty line of text`);
+	else if (value.length > NOTES.length) problems.push(`${at} must be at most ${NOTES.length} characters`);
+};
+const notes = (value: unknown, at: string, problems: Problems) => {
+	list(note)(value, at, problems);
+	if (!Array.isArray(value)) return;
+	if (value.length > NOTES.count) problems.push(`${at} must hold at most ${NOTES.count} notes`);
+	if (new Set(value).size !== value.length) problems.push(`${at} lists a note twice`);
+};
+
 /** Names each id that comes twice in a list. */
 const unique = (ids: unknown[], at: string, what: string, problems: Problems) => {
 	const seen = new Set<unknown>();
@@ -174,16 +192,22 @@ function version(value: unknown, at: string, problems: Problems) {
 }
 
 function revision(value: unknown, at: string, problems: Problems) {
-	object(value, at, problems, { id: short, commit, date, subject: anyText, step: blob, files }, { finishes: list(finish) });
+	object(value, at, problems, { id: short, commit, date, subject: anyText, step: blob, files }, { finishes: list(finish), notes });
 }
 
 function companions(value: unknown, at: string, problems: Problems) {
-	object(value, at, problems, {
-		label: text,
-		source: text,
-		latest: (latest, where, found) => (latest === null ? undefined : short(latest, where, found)),
-		revisions: list(revision)
-	});
+	object(
+		value,
+		at,
+		problems,
+		{
+			label: text,
+			source: text,
+			latest: (latest, where, found) => (latest === null ? undefined : short(latest, where, found)),
+			revisions: list(revision)
+		},
+		{ notes }
+	);
 	if (!isObject(value) || !Array.isArray(value.revisions)) return;
 	const ids = value.revisions.map((r) => (isObject(r) ? r.id : undefined));
 	unique(ids, `${at}.revisions`, 'revision', problems);

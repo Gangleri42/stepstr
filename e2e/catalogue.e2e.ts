@@ -48,6 +48,10 @@ test('picks models and versions in the header, and the route follows', async ({ 
 	await expect(page.getByRole('alert')).toHaveCount(0);
 });
 
+/** What the test site says about the companion track and about its revision. */
+const TRACK_NOTE = 'The newest twin is left out: it needs a deeper lamp.';
+const REVISION_NOTE = 'Its screws are not modelled.';
+
 /** The test site's catalogue with the files published for it, the twin in the latest Lamp's slot. */
 function publishedCatalogue(site: PublishedSite) {
 	const catalogue = JSON.parse(readFileSync(new URL('site/catalogue.json', import.meta.url), 'utf8')) as Catalogue;
@@ -61,7 +65,8 @@ function publishedCatalogue(site: PublishedSite) {
 		label: 'Insert',
 		source: 'https://example.com/twin',
 		latest: 'ddddddd',
-		revisions: [{ ...revision, files: { glb: site.twin.glb, measure: site.twin.measure } }]
+		revisions: [{ ...revision, files: { glb: site.twin.glb, measure: site.twin.measure }, notes: [REVISION_NOTE] }],
+		notes: [TRACK_NOTE]
 	};
 	return catalogue;
 }
@@ -143,6 +148,9 @@ test.describe('with published files', () => {
 		await expect(insert).toHaveValue('ddddddd');
 		await expect(insert.locator('option')).toHaveText(['As in CAD', 'ddddddd · 12 Oct · latest']);
 		await expect(page.locator('aside.panel')).toContainText('Twin the lamp');
+		// With the site's notes on the track and on the revision shown.
+		const notes = page.getByRole('list', { name: 'Notes on the Insert' }).getByRole('listitem');
+		await expect(notes).toHaveText([TRACK_NOTE, REVISION_NOTE]);
 		await page.getByRole('button', { name: 'STEP' }).click();
 		await expect(page.getByRole('menuitem')).toHaveText([/^Seed-v15\.step/, /^Insert ddddddd/]);
 		await page.keyboard.press('Escape');
@@ -152,6 +160,7 @@ test.describe('with published files', () => {
 		await insert.selectOption('cad');
 		await expect(page).toHaveURL(/#\/lamp@aaaaaaa\?m=b67pyd\.f1$/);
 		await expect(page.locator('html')).not.toHaveAttribute('data-companion');
+		await expect(notes).toHaveText([TRACK_NOTE]);
 		await expect(page.getByRole('button', { name: 'STEP' })).not.toHaveAttribute('aria-expanded');
 		await expect(page.locator('.measure-card')).not.toContainText('Distance');
 		await expect(page.locator('.toast')).toHaveCount(0);
@@ -163,6 +172,7 @@ test.describe('with published files', () => {
 		await page.goto(`${CATALOGUE_SITE}#/lamp@bbbbbbb`);
 		await expect(page.locator('html')).toHaveAttribute('data-glb', site.lamp.glb.sha256, { timeout: 60_000 });
 		await expect(page.locator('aside.panel')).toContainText('The Insert does not line up with this version');
+		await expect(page.getByRole('list', { name: 'Notes on the Insert' }).getByRole('listitem')).toHaveText([TRACK_NOTE]);
 		await expect(page.locator('html')).not.toHaveAttribute('data-companion');
 
 		// The model's button opens the newest of everything, its companion too; the version picker stays on pinned versions,

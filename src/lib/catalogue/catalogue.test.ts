@@ -124,6 +124,39 @@ describe('a site catalogue', () => {
 		expect(message).toContain('finishes[1].parts must be a non-empty list');
 	});
 
+	it("takes a site's notes on a companion track and on each revision, a few short lines of text", () => {
+		const track = ['The newest revision is left out: it needs a clock with a deeper case.'];
+		const revision = ['Built with its mounting holes filled.', 'The screws are not modelled.'];
+		const parsed = parseCatalogue(
+			changed((c) => {
+				c.models.clock.companions.notes = track;
+				c.models.clock.companions.revisions[0].notes = revision;
+				c.models.clock.companions.revisions[1].notes = [];
+			})
+		);
+		expect(parsed.models.clock.companions?.notes).toEqual(track);
+		expect(parsed.models.clock.companions?.revisions.map((r) => r.notes)).toEqual([revision, []]);
+
+		const message = refusal(
+			changed((c) => {
+				c.models.clock.companions.notes = 'The newest revision is left out.';
+				const [first, second] = c.models.clock.companions.revisions;
+				first.notes = ['', 'Two\nlines', 7, 'x'.repeat(301), 'Fine.', 'Fine.'];
+				second.notes = Array.from({ length: 9 }, (_, i) => `Note ${i}.`);
+			})
+		);
+		expect(message).toContain('companions.notes must be a list');
+		expect(message).toContain('revisions[0].notes[0] must be a non-empty line of text');
+		expect(message).toContain('revisions[0].notes[1] must be a non-empty line of text');
+		expect(message).toContain('revisions[0].notes[2] must be a non-empty line of text');
+		expect(message).toContain('revisions[0].notes[3] must be at most 300 characters');
+		expect(message).toContain('revisions[0].notes lists a note twice');
+		expect(message).toContain('revisions[1].notes must hold at most 8 notes');
+		expect(message).not.toContain('notes[4]');
+		// Notes belong to a companion's track and revisions, not to a model's versions.
+		expect(refusal(changed((c) => (c.models.lamp.versions[0].notes = ['A note.'])))).toMatch(/versions\[0\]\.notes is not a catalogue field/);
+	});
+
 	it('takes a slot with a shift, or none', () => {
 		expect(parseCatalogue(changed((c) => (c.models.clock.versions[0].slot = { id: 'a1b2c3', fix: [0, 0.5, -1] }))).models.clock.versions[0].slot).toEqual({ id: 'a1b2c3', fix: [0, 0.5, -1] });
 		expect(parseCatalogue(changed((c) => (c.models.clock.versions[0].slot = null))).models.clock.versions[0].slot).toBeNull();

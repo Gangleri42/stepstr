@@ -918,6 +918,7 @@
 			{#if picked?.model.companions && picked.version.slot !== undefined}
 				{@const track = picked.model.companions}
 				{@const choice = picked.companion}
+				{@const revisionNotes = picked.version.slot !== null && choice.kind === 'revision' ? (choice.revision.notes ?? []) : []}
 				<div class="notes companion">
 					{#if picked.version.slot === null}
 						<span class="title">{track.label}</span>
@@ -936,6 +937,16 @@
 						{#if companionFailed && choice.kind === 'revision' && companionFailed.id === choice.revision.id}
 							<span class="warn">{companionFailed.id} could not be fitted: {companionFailed.reason}</span>
 						{/if}
+					{/if}
+					{#if track.notes?.length || revisionNotes.length}
+						<ul aria-label="Notes on the {track.label}">
+							{#each track.notes ?? [] as note (note)}
+								<li>{note}</li>
+							{/each}
+							{#each revisionNotes as note (note)}
+								<li>{note}</li>
+							{/each}
+						</ul>
 					{/if}
 				</div>
 			{/if}

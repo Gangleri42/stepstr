@@ -26,7 +26,7 @@ test('opens a file sent as an intent, with the converter fetched through the she
 	await expect(napplet.locator('aside.panel')).toBeVisible({ timeout: 150_000 });
 	await expect(napplet.locator('html')).toHaveAttribute('data-glb', GOLDEN['seed-v15'].glb);
 	const resources = await page.evaluate(() => window.seen.resources);
-	expect(resources.filter((url) => url.startsWith('blossom:sha256:'))).toHaveLength(1);
+	expect(resources.filter((url) => url.startsWith('blossom:'))).toHaveLength(1);
 });
 
 test('offers the file from this device when the shell will not fetch one that large', async ({ page }) => {

@@ -57,13 +57,35 @@ async function query(filter: EventFilter, relays: string[] = [], author?: string
 	return newest(events.map((r) => r.event), filter);
 }
 
+/** The servers a link names: Myco reads four (October 2026), Paja eight. */
+const LINK_HINTS = 4;
+
+/**
+ * A blob as a BUD-10 link, `blossom:<sha256>?xs=<host>&…`, naming the first servers in it. Shells built on the common
+ * shim pass a napplet's `servers` option on to nobody, so the link carries them; Paja reads both and asks for this
+ * spelling rather than `blossom:sha256:`.
+ */
+export function blossomLink(sha256: string, servers: string[]) {
+	const hosts: string[] = [];
+	for (const server of servers) {
+		try {
+			const { host, protocol } = new URL(server);
+			if (protocol === 'https:' && !hosts.includes(host)) hosts.push(host);
+		} catch {
+			// Not a server address: nothing to hint.
+		}
+		if (hosts.length === LINK_HINTS) break;
+	}
+	return `blossom:${sha256}${hosts.length ? `?${hosts.map((host) => `xs=${encodeURIComponent(host)}`).join('&')}` : ''}`;
+}
+
 export function nappletTransport(): Transport {
 	return {
 		async blob(sha256, servers, onProgress, signal) {
 			onProgress?.(null);
-			// The canonical form first, where the shell picks the server; runtimes that only speak https get each server's
+			// The BUD-10 link first, where the shell picks the server; runtimes that only speak https get each server's
 			// BUD-01 address.
-			const attempts: [string, string[]?][] = [[`blossom:sha256:${sha256}`, servers], ...servers.map((s): [string] => [blobUrl(s, sha256)])];
+			const attempts: [string, string[]?][] = [[blossomLink(sha256, servers), servers], ...servers.map((s): [string] => [blobUrl(s, sha256)])];
 			let failure: unknown = new TransportError('not-found', 'no Blossom server was named for this file');
 			for (const [url, hints] of attempts) {
 				try {

@@ -172,10 +172,18 @@
 				return 'text/plain';
 			};
 			const fail = (code, message) => Object.assign(new Error(message), { code });
+			// A BUD-10 link, as Paja reads one: blossom:<sha256>, the older blossom:sha256:<sha256> too, an extension, and
+			// server hints in `xs` as a host or an https origin.
+			const BLOSSOM = /^blossom:(?:sha256:)?([0-9a-f]{64})(?:\.[0-9a-z]+)?(?:\?([^#]*))?$/i;
+			const hinted = (query) =>
+				new URLSearchParams(query ?? '').getAll('xs').map((s) => (/^[a-z0-9.-]+(?::\d+)?$/i.test(s) ? `https://${s}` : s));
 			async function fetchBytes(url, servers) {
-				const blossom = /^blossom:sha256:([0-9a-f]{64})$/.exec(url);
-				// A blob this shell holds (the napplet's own files) first, then the servers the napplet names.
-				const candidates = blossom ? [`/blob/${blossom[1]}`, ...(servers ?? []).map((s) => `${s.replace(/\/+$/, '')}/${blossom[1]}`)] : [url];
+				const match = BLOSSOM.exec(url);
+				const blossom = match && [match[0], match[1].toLowerCase()];
+				// A blob this shell holds (the napplet's own files) first, then the servers the napplet names: in the link, then
+				// beside it.
+				const named = match ? [...new Set([...hinted(match[2]), ...(servers ?? [])].map((s) => s.replace(/\/+$/, '')))] : [];
+				const candidates = blossom ? [`/blob/${blossom[1]}`, ...named.map((s) => `${s}/${blossom[1]}`)] : [url];
 				if (!candidates.length) throw fail('not-found', 'no server hint');
 				let last = fail('not-found', 'nothing found');
 				for (const candidate of candidates) {

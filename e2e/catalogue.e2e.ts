@@ -211,9 +211,10 @@ test.describe('with published files', () => {
 		const napplet = page.frameLocator('#frame');
 		await expect(napplet.locator('html')).toHaveAttribute('data-companion', site.twin.glb.sha256, { timeout: 60_000 });
 		await expect(napplet.locator('html')).toHaveAttribute('data-glb', site.lamp.glb.sha256);
-		// Asked of the shell by their hashes, and nothing else: neither the converter nor a STEP file.
+		// Asked of the shell by BUD-10 links naming the catalogue's server, and nothing else: neither the converter nor a
+		// STEP file.
 		const resources = await page.evaluate(() => window.seen.resources);
-		expect(resources).toContain(`blossom:sha256:${site.lamp.glb.sha256}`);
-		expect(resources.filter((url) => !site.files.some((sha256) => url === `blossom:sha256:${sha256}`))).toEqual([]);
+		expect(resources).toContain(`blossom:${site.lamp.glb.sha256}?xs=blossom.example.com`);
+		expect(resources.filter((url) => !site.files.some((sha256) => url === `blossom:${sha256}?xs=blossom.example.com`))).toEqual([]);
 	});
 });

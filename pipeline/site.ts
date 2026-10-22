@@ -2,46 +2,14 @@
 // tools read that site's .nsite/config.json and write and read its outputs there, while the code, the packages and the
 // tsconfig stay stepstr's, so every site converts with the same code and gets the same conversion id.
 import { existsSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { Plugin } from 'vite';
 import { parseCatalogue, type Catalogue } from '../src/lib/catalogue/catalogue.ts';
 import { nappletRole } from '../src/lib/state/archetype.ts';
 import { readConfig } from './nostr/config.ts';
+import { SITE } from './site-paths.ts';
 
-export type SitePaths = {
-	dir: string;
-	/** The site's .nsite/config.json, as nostr/config.ts reads it. */
-	config: string;
-	/** Its models and their versions (src/lib/catalogue), where it has them. */
-	catalogue: string;
-	/** The files the catalogue names, each by its sha256, as the site's builder leaves them for the publisher. */
-	catalogueFiles: string;
-	/** The web build. */
-	build: string;
-	/** The napplet build: index.html, converter.txt and the manifest template. */
-	napplet: string;
-	/** The copies of the catalogue's files a files-only publish verified, which no manifest lists yet. Never published. */
-	verified: string;
-};
-
-export const STEPSTR_DIR = fileURLToPath(new URL('..', import.meta.url));
-
-/** A site's paths; a relative directory is taken from where the command runs. */
-export function sitePaths(dir: string): SitePaths {
-	const at = resolve(dir);
-	return {
-		dir: at,
-		config: join(at, '.nsite/config.json'),
-		catalogue: join(at, 'catalogue.json'),
-		catalogueFiles: join(at, 'catalogue-files'),
-		build: join(at, 'build'),
-		napplet: join(at, 'dist-napplet'),
-		verified: join(at, '.cache/verified-copies.json')
-	};
-}
-
-export const SITE = sitePaths(process.env.STEPSTR_SITE || STEPSTR_DIR);
+// The paths alone live in site-paths.ts, which the Pages mirror loads without src/.
+export { SITE, sitePaths, STEPSTR_DIR, type SitePaths } from './site-paths.ts';
 
 /** The site's catalogue.json as written and as checked, or null for a site without one. One that fails the check stops the build. */
 export function readCatalogue(path = SITE.catalogue): { text: string; catalogue: Catalogue } | null {

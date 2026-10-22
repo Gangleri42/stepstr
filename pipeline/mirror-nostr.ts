@@ -10,7 +10,7 @@ import { download, extOf } from './nostr/blossom.ts';
 import { KIND, LOOKUP_RELAYS, readConfig } from './nostr/config.ts';
 import { tagValues, validate } from './nostr/manifest.ts';
 import { Relays } from './nostr/relays.ts';
-import { SITE } from './site.ts';
+import { SITE } from './site-paths.ts';
 
 function fail(message: string): never {
 	console.error(`error: ${message}`);

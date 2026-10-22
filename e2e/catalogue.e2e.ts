@@ -1,12 +1,10 @@
 // The web build of a site with a catalogue (e2e/site): two models, Lamp at two versions and a Twin of it, all with the
 // Seed test file's bytes. As built, its catalogue names a conversion no viewer has, so only the first opens, by
 // converting. The tests after that serve it with the files a site's builder publishes (e2e/published.ts) and a twin of
-// the Lamp as the companion in its slot.
-import { readFileSync } from 'node:fs';
+// the Lamp as the companion in its slot; the last opens the site's napplet, built with those files, in the dev shell.
 import { expect, test, type Page } from '@playwright/test';
-import type { Catalogue } from '../src/lib/catalogue/catalogue';
-import { publishedFile, publishedSite, SLOT, TWIN, type PublishedSite } from './published';
-import { CATALOGUE_SITE, GOLDEN, SEED_URL, serveFixtures } from './support';
+import { publishedCatalogue, publishedFile, publishedSite, REVISION_NOTE, TRACK_NOTE, TWIN, type PublishedSite } from './published';
+import { CATALOGUE_SHELL, CATALOGUE_SITE, GOLDEN, SEED_URL, serveFixtures } from './support';
 
 test.beforeEach(async ({ page }) => {
 	await serveFixtures(page);
@@ -47,29 +45,6 @@ test('picks models and versions in the header, and the route follows', async ({ 
 	await expect(page).toHaveURL(/#\/lamp@aaaaaaa$/);
 	await expect(page.getByRole('alert')).toHaveCount(0);
 });
-
-/** What the test site says about the companion track and about its revision. */
-const TRACK_NOTE = 'The newest twin is left out: it needs a deeper lamp.';
-const REVISION_NOTE = 'Its screws are not modelled.';
-
-/** The test site's catalogue with the files published for it, the twin in the latest Lamp's slot. */
-function publishedCatalogue(site: PublishedSite) {
-	const catalogue = JSON.parse(readFileSync(new URL('site/catalogue.json', import.meta.url), 'utf8')) as Catalogue;
-	catalogue.conversion = site.conversion;
-	for (const model of Object.values(catalogue.models)) for (const version of model.versions) version.files = site.lamp;
-	const [latest, older] = catalogue.models.lamp.versions;
-	latest.slot = { id: SLOT, fix: [0, 0, 40] };
-	older.slot = null;
-	const revision = { id: 'ddddddd', commit: 'ddddddd'.padEnd(40, '0'), date: '2026-10-12', subject: 'Twin the lamp', step: site.twin.step };
-	catalogue.models.lamp.companions = {
-		label: 'Insert',
-		source: 'https://example.com/twin',
-		latest: 'ddddddd',
-		revisions: [{ ...revision, files: { glb: site.twin.glb, measure: site.twin.measure }, notes: [REVISION_NOTE] }],
-		notes: [TRACK_NOTE]
-	};
-	return catalogue;
-}
 
 /**
  * Serves the test site with the published catalogue, and its Blossom server with the published files but those
@@ -219,5 +194,17 @@ test.describe('with published files', () => {
 		expect(requests.blossom).toContainEqual(expect.stringContaining(site.twin.step.sha256));
 		expect(requests.converter).toHaveLength(1);
 		expect(requests.step).toEqual([]);
+	});
+
+	test("opens the home model in the napplet from its files, fitted, under Paja's limits", async ({ page }) => {
+		await page.goto(CATALOGUE_SHELL);
+		await expect(page.locator('#parity')).toBeChecked();
+		const napplet = page.frameLocator('#frame');
+		await expect(napplet.locator('html')).toHaveAttribute('data-companion', site.twin.glb.sha256, { timeout: 60_000 });
+		await expect(napplet.locator('html')).toHaveAttribute('data-glb', site.lamp.glb.sha256);
+		// Asked of the shell by their hashes, and nothing else: neither the converter nor a STEP file.
+		const resources = await page.evaluate(() => window.seen.resources);
+		expect(resources).toContain(`blossom:sha256:${site.lamp.glb.sha256}`);
+		expect(resources.filter((url) => !site.files.some((sha256) => url === `blossom:sha256:${sha256}`))).toEqual([]);
 	});
 });

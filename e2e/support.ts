@@ -9,6 +9,8 @@ import { FIXTURES, fixture, goldenKey, type FixtureName } from '../test/fixtures
 export const SHELL = 'http://127.0.0.1:4281/';
 /** The web build of the site with a catalogue (e2e/site), which the tests serve too. */
 export const CATALOGUE_SITE = 'http://127.0.0.1:4275/';
+/** A dev shell with that site's napplet, built with its published files (e2e/published.ts). */
+export const CATALOGUE_SHELL = 'http://127.0.0.1:4282/';
 
 /** Where the Seed test file lives, pinned to a commit. */
 export const SEED_URL = FIXTURES['seed-v15'].urls[0];

@@ -1,6 +1,6 @@
 // Browser tests (e2e/*.e2e.ts) in Chromium, Firefox and WebKit: the web build as the static site serves it, the web
-// build of a site with a catalogue (e2e/site), and the napplet in the local dev shell, each on a port of its own so no
-// other project's server is taken for it. The test
+// build of a site with a catalogue (e2e/site), and the napplet of each in the local dev shell, each on a port of its
+// own so no other project's server is taken for it. The test
 // files come from `node scripts/fixtures.mjs` and are served in place of the network, so every browser converts the
 // same bytes and must produce the same model.
 //   npx playwright install chromium firefox webkit   once
@@ -41,6 +41,15 @@ export default defineConfig({
 			command: 'npm run build:napplet && node scripts/dev-shell/serve.mjs',
 			env: { PORT: '4281' },
 			url: 'http://127.0.0.1:4281/',
+			reuseExistingServer: !process.env.CI,
+			timeout: 300_000
+		},
+		// The napplet of the site with a catalogue, which carries the catalogue: built with the files published for it
+		// (e2e/published.ts, NAPPLET_SITE), which the dev shell serves.
+		{
+			command: 'npx tsx e2e/published.ts --napplet-site && npm run build:napplet && node scripts/dev-shell/serve.mjs',
+			env: { STEPSTR_SITE: '.cache/e2e-published/napplet-site', PORT: '4282' },
+			url: 'http://127.0.0.1:4282/',
 			reuseExistingServer: !process.env.CI,
 			timeout: 300_000
 		}

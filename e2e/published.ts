@@ -2,20 +2,24 @@
 // Seed test file: its own files, and a twin of it as a companion revision for one of its parts, with part ids of
 // its own as a builder gives a companion's. Made once per conversion id into .cache/e2e-published, and served by the
 // tests in place of the Blossom servers the catalogue names.
-//   npx tsx e2e/published.ts      makes them ahead of a test run (the Playwright config does too)
+//   npx tsx e2e/published.ts                  makes them ahead of a test run
+//   npx tsx e2e/published.ts --napplet-site   and the test site with them, for its napplet (the Playwright config)
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gzipSync, zipSync } from 'fflate';
 import { about } from '../pipeline/about.ts';
 import { compressGlb } from '../pipeline/compress.ts';
 import { convert, publishable, WASM, type Pin } from '../pipeline/convert.ts';
+import type { Catalogue } from '../src/lib/catalogue/catalogue.ts';
 import { MemoryIO } from '../src/lib/pipeline/memory-io.ts';
 import { fixture } from '../test/fixtures.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const CACHE = join(root, '.cache/e2e-published');
+/** The test site with its published files, as its builder leaves it for the napplet build and the dev shell. */
+export const NAPPLET_SITE = join(CACHE, 'napplet-site');
 
 /** The part of the Seed test file that the twin takes the place of. */
 export const SLOT = 'tpen9t';
@@ -83,7 +87,50 @@ export function publishedFile(site: PublishedSite, sha256: string): Buffer | nul
 	return /^[0-9a-f]{64}$/.test(sha256) && existsSync(path) ? readFileSync(path) : null;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+/** What the test site says about the companion track and about its revision. */
+export const TRACK_NOTE = 'The newest twin is left out: it needs a deeper lamp.';
+export const REVISION_NOTE = 'Its screws are not modelled.';
+
+/** The test site's catalogue with the files published for it, the twin in the latest Lamp's slot. */
+export function publishedCatalogue(site: PublishedSite) {
+	const catalogue = JSON.parse(readFileSync(new URL('site/catalogue.json', import.meta.url), 'utf8')) as Catalogue;
+	catalogue.conversion = site.conversion;
+	for (const model of Object.values(catalogue.models)) for (const version of model.versions) version.files = site.lamp;
+	const [latest, older] = catalogue.models.lamp.versions;
+	latest.slot = { id: SLOT, fix: [0, 0, 40] };
+	older.slot = null;
+	const revision = { id: 'ddddddd', commit: 'ddddddd'.padEnd(40, '0'), date: '2026-10-12', subject: 'Twin the lamp', step: site.twin.step };
+	catalogue.models.lamp.companions = {
+		label: 'Insert',
+		source: 'https://example.com/twin',
+		latest: 'ddddddd',
+		revisions: [{ ...revision, files: { glb: site.twin.glb, measure: site.twin.measure }, notes: [REVISION_NOTE] }],
+		notes: [TRACK_NOTE]
+	};
+	return catalogue;
+}
+
+/**
+ * The test site in NAPPLET_SITE, for the napplet, which carries its catalogue: the site's config, the published
+ * catalogue, and the published files in catalogue-files by sha256, where the dev shell serves them as Blossom would.
+ */
+export async function nappletSite(): Promise<PublishedSite> {
 	const site = await publishedSite();
-	console.log(`published files for conversion ${site.conversion.slice(0, 12)} in ${join(CACHE, site.conversion)}`);
+	rmSync(NAPPLET_SITE, { recursive: true, force: true });
+	mkdirSync(join(NAPPLET_SITE, '.nsite'), { recursive: true });
+	mkdirSync(join(NAPPLET_SITE, 'catalogue-files'));
+	copyFileSync(new URL('site/.nsite/config.json', import.meta.url), join(NAPPLET_SITE, '.nsite/config.json'));
+	writeFileSync(join(NAPPLET_SITE, 'catalogue.json'), `${JSON.stringify(publishedCatalogue(site), null, '\t')}\n`);
+	for (const sha256 of site.files) copyFileSync(join(CACHE, site.conversion, sha256), join(NAPPLET_SITE, 'catalogue-files', sha256));
+	return site;
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+	if (process.argv.includes('--napplet-site')) {
+		await nappletSite();
+		console.log(`the test site with its published files in ${NAPPLET_SITE}`);
+	} else {
+		const site = await publishedSite();
+		console.log(`published files for conversion ${site.conversion.slice(0, 12)} in ${join(CACHE, site.conversion)}`);
+	}
 }

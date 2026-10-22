@@ -61,5 +61,8 @@
 		"nostr-tools": "^2.25.2",
 		"three": "^0.186.1",
 		"three-mesh-bvh": "^0.9.15"
+	},
+	"overrides": {
+		"cookie": "^0.7.2"
 	}
 }

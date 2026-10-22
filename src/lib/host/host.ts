@@ -82,4 +82,6 @@ export interface Host {
 	recent?: RecentStore;
 	/** The site's models and their versions, where it has a catalogue. */
 	catalogue?: Catalogue;
+	/** Why the site's catalogue is missing, where it has one that could not be loaded. */
+	catalogueProblem?: string;
 }

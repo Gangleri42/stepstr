@@ -9,23 +9,28 @@ import { copyText } from './copy';
 import type { Host, ShareLink } from './host';
 import { webTransport } from './web-transport';
 
+/** A site's catalogue as the page got it, or why it has none. */
+export type FetchedCatalogue = { catalogue: Catalogue; problem?: undefined } | { catalogue: null; problem: string };
+
 /**
  * The site's catalogue.json, fetched before the app starts. It goes to the network each time (the service worker keeps
- * a copy for offline use), so a new publish shows at once. Null when it cannot be had or is not valid: the page then
- * opens files as any stepstr does.
+ * a copy for offline use), so a new publish shows at once. When it cannot be had or is not valid, the page opens files
+ * as any stepstr does, and the app says why.
  */
-export async function fetchCatalogue(url: string): Promise<Catalogue | null> {
+export async function fetchCatalogue(url: string): Promise<FetchedCatalogue> {
+	let problem: string;
 	try {
 		const response = await fetch(url, { cache: 'no-cache' });
-		if (response.ok) return parseCatalogue(await response.json());
-		console.warn(`${url}: ${response.status} ${response.statusText}`);
+		if (response.ok) return { catalogue: parseCatalogue(await response.json()) };
+		problem = `${response.status} ${response.statusText}`.trim();
 	} catch (err) {
-		console.warn(`${url}: ${err instanceof Error ? err.message : String(err)}`);
+		problem = err instanceof Error ? err.message : String(err);
 	}
-	return null;
+	console.warn(`${url}: ${problem}`);
+	return { catalogue: null, problem };
 }
 
-export function createWebHost(servers: string[], catalogue?: Catalogue): Host {
+export function createWebHost(servers: string[], catalogue?: Catalogue, catalogueProblem?: string): Host {
 	return {
 		initialRoute: () => location.hash,
 		onRoute(listener) {
@@ -54,6 +59,7 @@ export function createWebHost(servers: string[], catalogue?: Catalogue): Host {
 			return true;
 		},
 		recent: indexedDbRecent(),
-		catalogue
+		catalogue,
+		catalogueProblem
 	};
 }

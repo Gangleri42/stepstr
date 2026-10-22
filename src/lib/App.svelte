@@ -44,7 +44,8 @@
 	let loadedSource: { source: Source; name: string | null } | null = null;
 	let stage = $state<Stage | null>(null);
 	let failure = $state<{ message: string; hint?: 'local' | 'web' } | null>(null);
-	let notice = $state('');
+	// A site whose catalogue could not be loaded says so as it starts: its model links open nothing without it.
+	let notice = $state(untrack(() => (host.catalogueProblem ? `The site's catalogue could not be loaded (${host.catalogueProblem}), so its models are not listed. Reload to try again.` : '')));
 	let openShown = $state(false);
 	let dragging = $state(false);
 	let panelOpen = $state(true);

@@ -46,6 +46,15 @@ test('picks models and versions in the header, and the route follows', async ({ 
 	await expect(page.getByRole('alert')).toHaveCount(0);
 });
 
+test('says so when the site cannot load its catalogue, and still opens files', async ({ page }) => {
+	await page.route(`${CATALOGUE_SITE}catalogue.json`, (route) => route.fulfill({ status: 404, body: 'gone' }));
+	await page.goto(`${CATALOGUE_SITE}#/lamp@aaaaaaa`);
+	await expect(page.locator('.toast')).toContainText("The site's catalogue could not be loaded (404");
+	await expect(page.locator('.toast')).toContainText('so its models are not listed. Reload to try again.');
+	await expect(page.locator('header').getByRole('button', { name: 'Lamp' })).toHaveCount(0);
+	await expect(page.getByRole('heading', { name: 'Open a STEP file' })).toBeVisible();
+});
+
 /**
  * Serves the test site with the published catalogue, and its Blossom server with the published files but those
  * `withheld` names. Gives the requests that went to the server, for the Lamp's STEP file and for the converter.

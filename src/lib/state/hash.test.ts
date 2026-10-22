@@ -132,6 +132,14 @@ describe('hash, on a site with a catalogue', () => {
 		expect(at('#/stand@ccc44.44')).toEqual(model('stand'));
 	});
 
+	it('reads @latest, and an @ with nothing after it, as no version: the newest', () => {
+		expect(at('#/lamp@latest')).toEqual(model('lamp'));
+		expect(at('#/lamp@LATEST?ortho=1').source).toEqual({ kind: 'catalogue', model: 'lamp' });
+		expect(at('#/lamp@')).toEqual(model('lamp'));
+		expect(at('#/lamp@?ortho=1').source).toEqual({ kind: 'catalogue', model: 'lamp' });
+		expect(encode(at('#/lamp@latest?ortho=1'))).toBe('#/lamp?ortho=1');
+	});
+
 	it('keeps any version from a link as written, which the catalogue resolves', () => {
 		const state = at('#/stand@41?b=cad&m=a.f1');
 		expect(state.source).toEqual({ kind: 'catalogue', model: 'stand', version: '41', companion: 'cad' });

@@ -171,14 +171,16 @@ function triple(text: string | undefined): [number, number, number] | null {
 const POINTER = /^(?:note|nevent|naddr)1[02-9ac-hj-np-z]{6,}$/;
 const ROUTE = /^#\/(?:b\/([0-9a-f]{64})(?:\.([a-z0-9]{1,8}))?|(u)|n\/([0-9a-z]+))?(?:\?(.*))?$/i;
 // Any version is kept as written, in lowercase: one the catalogue does not list opens the latest, and says so.
-const MODEL_ROUTE = /^#\/([a-z0-9-]+)(?:@([0-9a-z]{1,40}))?(?:\?(.*))?$/i;
+// `@latest`, and an `@` with nothing after it, name no version: the newest opens, as for the model alone.
+const MODEL_ROUTE = /^#\/([a-z0-9-]+)(?:@([0-9a-z]{0,40}))?(?:\?(.*))?$/i;
 const QUERY = /^[\w.,:;!=&%-]*$/;
 
 /** A route that names a model the catalogue lists: the model, the version as written and the query. */
 function modelRoute(hash: string, catalogue: RouteCatalogue | null | undefined) {
 	const match = catalogue ? MODEL_ROUTE.exec(hash) : null;
 	if (!catalogue || !match || !Object.hasOwn(catalogue.models, match[1].toLowerCase())) return null;
-	return { model: match[1].toLowerCase(), version: match[2]?.toLowerCase(), query: match[3] };
+	const version = match[2]?.toLowerCase();
+	return { model: match[1].toLowerCase(), version: version && version !== 'latest' ? version : undefined, query: match[3] };
 }
 
 /**

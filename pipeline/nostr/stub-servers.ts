@@ -20,6 +20,8 @@ export type Server = {
 	refusesHeld?: boolean;
 	/** It has no mirror endpoint. */
 	noMirror?: boolean;
+	/** It answers a blob asked for with an extension with a 404, as some do for an extension they do not know. */
+	bareOnly?: boolean;
 	/** What was asked of it: "<method> <path>". */
 	calls: string[];
 };
@@ -52,7 +54,7 @@ export function world(spec: Record<string, Partial<Server>>) {
 		const hash = /^\/([0-9a-f]{64})/.exec(url.pathname)?.[1];
 		if (hash) {
 			const blob = server.blobs.get(hash);
-			if (!blob) return new Response(null, { status: 404 });
+			if (!blob || (server.bareOnly && url.pathname !== `/${hash}`)) return new Response(null, { status: 404 });
 			return new Response(method === 'HEAD' ? null : (blob.slice().buffer as ArrayBuffer), { headers: { 'content-length': String(blob.length) } });
 		}
 		if (url.pathname === '/upload' && method === 'HEAD') {

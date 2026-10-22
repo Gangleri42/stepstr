@@ -115,14 +115,22 @@ describe('spreading files over Blossom servers', () => {
 			'1 files reach fewer than 1 public servers: /index.html (0)'
 		);
 		expect(servers[OWN].calls).toEqual([`HEAD /${page.sha256}`, `HEAD /${page.sha256}`]);
-		expect(servers[A].calls).toContain(`GET /${page.sha256}.html`);
+		expect(servers[A].calls).toContain(`GET /${page.sha256}`);
+	});
+
+	it('verifies each copy by its bare hash, which a server that knows no extension for it still serves', async () => {
+		const servers = world({ [OWN]: {}, [A]: { bareOnly: true } });
+		const out = await spread(options([OWN, A], [page, model]));
+		expect(out.holders.get(page.sha256)).toEqual([OWN, A]);
+		expect(out.holders.get(model.sha256)).toEqual([OWN, A]);
+		expect(servers[A].calls).toEqual(expect.arrayContaining([`GET /${page.sha256}`, `GET /${model.sha256}`]));
 	});
 
 	it("lists in the site manifest only servers whose catalogue copies passed their check, besides those refusing a type", async () => {
 		// A holds a copy of the model of the right size and the wrong bytes; B refuses models.
 		const servers = world({ [OWN]: {}, [A]: { blobs: new Map([[model.sha256, new Uint8Array(model.bytes)]]) }, [B]: { refuses: ['model/gltf-binary'] } });
 		const out = await spread(options([OWN, A, B], [page, model, measure], { minPublic: 0 }));
-		expect(servers[A].calls).toContain(`GET /${model.sha256}.glb`);
+		expect(servers[A].calls).toContain(`GET /${model.sha256}`);
 		expect(out.holders.get(model.sha256)).toEqual([OWN]);
 		expect(holdingAll(out, [OWN, A, B], [page])).toEqual([OWN, A, B]);
 		expect(siteServers(out, [OWN, A, B], [page], [model, measure])).toEqual([OWN, B]);

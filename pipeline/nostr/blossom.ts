@@ -133,10 +133,14 @@ export async function download(server: string, sha256: string, ext?: string): Pr
 	}
 }
 
-/** Downloads the file and checks its hash: what a gateway or shell will do. */
+/**
+ * Downloads the file and checks its hash, as a gateway or shell does: by the bare hash, the address every Blossom server
+ * must answer (BUD-01). Some answer a name with an extension they do not know with a 404 (blossom.nostr.black and
+ * blossom.data.haus with `.webmanifest`, October 2026).
+ */
 export async function verify(server: string, entry: FileEntry): Promise<Result> {
 	try {
-		const response = await attempt(() => fetch(blobUrl(server, entry.sha256, extOf(entry.path)), { signal: AbortSignal.timeout(TIMEOUT * 5), redirect: 'follow' }));
+		const response = await attempt(() => fetch(blobUrl(server, entry.sha256), { signal: AbortSignal.timeout(TIMEOUT * 5), redirect: 'follow' }));
 		if (!response.ok) return result(response);
 		const data = new Uint8Array(await response.arrayBuffer());
 		if (entry.bytes > 0 && data.byteLength !== entry.bytes) return { ok: false, status: response.status, reason: `${data.byteLength} bytes, expected ${entry.bytes}` };

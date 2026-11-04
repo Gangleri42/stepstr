@@ -4,6 +4,7 @@
 // uploaded. Last, every copy that no earlier publish verified, that was placed in this run or that a server reports at
 // another size is downloaded and hashed. A server that refuses a type, or one file, goes without it and is reported;
 // the run fails only when the site's own server lacks a file or a file reaches fewer public servers than asked for.
+// A server that says it is full, or refuses several files in a row, is asked for no more this run.
 //
 // Uploads are authorised by kind 24242 events. One covers a batch of files on every server, so a run signs a handful.
 // A server that refuses it gets one signed just before each transfer from then on. In October 2026 nostr.download and
@@ -45,6 +46,7 @@ export type Spread = {
 
 const BATCH = 20;
 const EXPIRY = 600;
+const REFUSALS_IN_A_ROW = 3;
 
 /**
  * The authorisations a publish signs for `entries`. One covers a batch of 20 hashes on every server, so a run signs a
@@ -91,6 +93,13 @@ const pair = (server: string, entry: { sha256: string }) => `${server} ${entry.s
  * file too, so the fresh authorisation it earns costs one signature and marks the server only when it works.
  */
 const unauthorised = (r: Result) => r.status === 400 || r.status === 401 || r.status === 403;
+/**
+ * A refusal that says the server is out of room, so another authorisation or another file will not change it. In
+ * November 2026 files.sovbit.host answered "Storage quota exceeded" and blossom.yakihonne.com "storage quota exceeded
+ * or unavailable".
+ */
+const full = (r: Result) => r.status === 507 || /quota/i.test(r.reason);
+const NOT_ASKED: Result = { ok: false, status: 507, reason: 'asked for no more files this run' };
 
 export async function spread(options: SpreadOptions): Promise<Spread> {
 	const { servers, entries, minPublic, auth } = options;
@@ -102,7 +111,7 @@ export async function spread(options: SpreadOptions): Promise<Spread> {
 	async function authorised(server: string, entry: FileEntry, send: (auth: Event) => Promise<Result>): Promise<Result> {
 		if (strict.has(server)) return send(await auth.fresh(entry));
 		const first = await send(await auth.batched(entry));
-		if (first.ok || !unauthorised(first)) return first;
+		if (first.ok || !unauthorised(first) || full(first)) return first;
 		const again = await send(await auth.fresh(entry));
 		if (again.ok && !strict.has(server)) {
 			strict.add(server);
@@ -148,6 +157,8 @@ export async function spread(options: SpreadOptions): Promise<Spread> {
 	const recheck = new Set<string>();
 	const placed = new Map<string, Set<string>>();
 	const down = new Set<string>();
+	const closed = new Set<string>();
+	const refusalsInARow = new Map<string, number>();
 	const lost: FileEntry[] = [];
 	const place = async (server: string, entry: FileEntry): Promise<Result> => {
 		const found = await head(server, entry.sha256);
@@ -156,9 +167,10 @@ export async function spread(options: SpreadOptions): Promise<Spread> {
 			return { ok: true, status: 200, reason: 'present' };
 		}
 		recheck.add(pair(server, entry));
+		if (closed.has(server)) return NOT_ASKED;
 		if (server !== own) {
 			const mirrored = await authorised(server, entry, (event) => mirror(server, blobUrl(own, entry.sha256, extOf(entry.path)), event));
-			if (mirrored.ok) return mirrored;
+			if (mirrored.ok || full(mirrored)) return mirrored;
 		}
 		const bytes = await options.bytesOf(entry);
 		if (!bytes) return { ok: false, status: 0, reason: "neither here nor on the site's own server" };
@@ -178,10 +190,22 @@ export async function spread(options: SpreadOptions): Promise<Spread> {
 		const others = servers.slice(1).filter((server) => takes(server, entry.type) && !down.has(server));
 		const results = await Promise.all(others.map((server) => place(server, entry)));
 		results.forEach((r, i) => {
-			if (r.ok) return void holding.add(others[i]);
-			log(`  ${others[i]} did not take ${entry.path}: ${r.status} ${r.reason}`);
+			const server = others[i];
+			if (r.ok) {
+				// Only a file it took shows it still takes files; finding an old one there says nothing.
+				if (r.reason !== 'present') refusalsInARow.delete(server);
+				return void holding.add(server);
+			}
+			if (r === NOT_ASKED) return;
+			log(`  ${server} did not take ${entry.path}: ${r.status} ${r.reason}`);
 			// A server that does not answer at all is left alone for the rest of the run.
-			if (r.status === 0) down.add(others[i]);
+			if (r.status === 0) return void down.add(server);
+			const refusals = (refusalsInARow.get(server) ?? 0) + 1;
+			refusalsInARow.set(server, refusals);
+			if (full(r) || refusals >= REFUSALS_IN_A_ROW) {
+				closed.add(server);
+				log(`  ${server} gets no more files this run; it keeps counting for those it holds`);
+			}
 		});
 		placed.set(entry.sha256, holding);
 		log(`  ${entry.path} (${(entry.bytes / 1e3).toFixed(0)} kB) on ${holding.size} servers`);

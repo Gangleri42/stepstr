@@ -118,6 +118,32 @@ describe('spreading files over Blossom servers', () => {
 		expect(servers[A].calls).toContain(`GET /${page.sha256}`);
 	});
 
+	it('asks a server that says it is full for nothing more, without a fresh signature, and counts what it holds', async () => {
+		const noRoom = { status: 400, reason: 'Storage quota exceeded (524281298/524288000 bytes used)' };
+		const servers = world({ [OWN]: {}, [A]: {}, [B]: { refusesTransfers: noRoom, blobs: new Map([[page.sha256, page.data]]) } });
+		const { auth, signed } = authorisations();
+		const lines: string[] = [];
+		const out = await spread({ ...options([OWN, A, B], [page, model, measure]), auth, log: (line) => lines.push(line) });
+		expect(out.holders.get(page.sha256)).toEqual([OWN, A, B]);
+		expect(out.holders.get(model.sha256)).toEqual([OWN, A]);
+		expect(out.holders.get(measure.sha256)).toEqual([OWN, A]);
+		expect(signed.fresh).toEqual([]);
+		// One mirror attempt in all (tried unpadded, then padded), no upload, and the next file gets a HEAD only.
+		expect(servers[B].calls.filter((call) => call.startsWith('PUT'))).toEqual(['PUT /mirror', 'PUT /mirror']);
+		expect(lines.filter((line) => line.includes(`${B} did not take`))).toHaveLength(1);
+		expect(lines.filter((line) => line.includes(`${B} gets no more files`))).toHaveLength(1);
+	});
+
+	it('asks a server that refused three files in a row for nothing more', async () => {
+		const models = ['a', 'b', 'c', 'd'].map((name) => file(`${name}.glb`, 'model/gltf-binary', name));
+		const servers = world({ [OWN]: {}, [A]: {}, [B]: { refusesTransfers: { status: 500, reason: 'Internal Server Error' } } });
+		const lines: string[] = [];
+		const out = await spread(options([OWN, A, B], models, { log: (line) => lines.push(line) }));
+		for (const entry of models) expect(out.holders.get(entry.sha256)).toEqual([OWN, A]);
+		expect(servers[B].calls.filter((call) => call === 'PUT /upload')).toHaveLength(3);
+		expect(lines.filter((line) => line.includes(`${B} did not take`))).toHaveLength(3);
+	});
+
 	it('verifies each copy by its bare hash, which a server that knows no extension for it still serves', async () => {
 		const servers = world({ [OWN]: {}, [A]: { bareOnly: true } });
 		const out = await spread(options([OWN, A], [page, model]));

@@ -20,6 +20,8 @@ export type Server = {
 	refusesHeld?: boolean;
 	/** It has no mirror endpoint. */
 	noMirror?: boolean;
+	/** The answer it gives every mirror and upload. */
+	refusesTransfers?: { status: number; reason: string };
 	/** It answers a blob asked for with an extension with a 404, as some do for an extension they do not know. */
 	bareOnly?: boolean;
 	/** What was asked of it: "<method> <path>". */
@@ -61,6 +63,7 @@ export function world(spec: Record<string, Partial<Server>>) {
 			if (server.refusesHeld && server.blobs.has(headers.get('x-sha-256') ?? '')) return refuse(400, 'already got that file (head)');
 			return server.refuses?.includes(headers.get('x-content-type') ?? '') ? refuse(415, 'type not allowed') : new Response(null, { status: 200 });
 		}
+		if (server.refusesTransfers && method === 'PUT') return refuse(server.refusesTransfers.status, server.refusesTransfers.reason);
 		if (url.pathname === '/upload' && method === 'PUT') {
 			const body = new Uint8Array(init.body as Uint8Array);
 			server.blobs.set(sha256(body), body);

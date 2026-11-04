@@ -58,7 +58,10 @@ for another site from the same checkout: they read `<dir>/.nsite/config.json` an
 `<dir>/dist-napplet`.
 
 A site can list its own models in `<dir>/catalogue.json` (`src/lib/catalogue/catalogue.ts`): each model's versions,
-their STEP files and the conversions published for them. The web page fetches it as it starts; the napplet carries it.
+their STEP files and the conversions published for them. The napplet carries it. The web page fetches it as it starts:
+the catalogue the site's newest signed manifest names, from the Blossom servers that manifest lists, so a new version
+shows without deploying the page. The copy beside the page stands in when the relays do not answer within a second or
+two, when no server has the newer one, and offline. So a site with a catalogue asks its relays on every page load.
 The publisher spreads the files the catalogue names from `<dir>/catalogue-files/<sha256>` with the site's own, to
 every configured Blossom server that takes their type. `--files-only` uploads those files alone and publishes nothing,
 so a new version's files can be on the servers before the catalogue that names them. It records the copies it checked

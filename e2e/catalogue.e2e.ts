@@ -2,7 +2,10 @@
 // Seed test file's bytes. As built, its catalogue names a conversion no viewer has, so only the first opens, by
 // converting. The tests after that serve it with the files a site's builder publishes (e2e/published.ts) and a twin of
 // the Lamp as the companion in its slot; the last opens the site's napplet, built with those files, in the dev shell.
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
+import { finalizeEvent } from 'nostr-tools/pure';
 import { publishedCatalogue, publishedFile, publishedSite, REVISION_NOTE, TRACK_NOTE, TWIN, type PublishedSite } from './published';
 import { CATALOGUE_SHELL, CATALOGUE_SITE, GOLDEN, SEED_URL, serveFixtures } from './support';
 
@@ -53,6 +56,29 @@ test('says so when the site cannot load its catalogue, and still opens files', a
 	await expect(page.locator('.toast')).toContainText('so its models are not listed. Reload to try again.');
 	await expect(page.locator('header').getByRole('button', { name: 'Lamp' })).toHaveCount(0);
 	await expect(page.getByRole('heading', { name: 'Open a STEP file' })).toBeVisible();
+});
+
+test('lists what the newest signed manifest names, without a new deploy of the page', async ({ page }) => {
+	const catalogue = JSON.parse(readFileSync(new URL('./site/catalogue.json', import.meta.url), 'utf8'));
+	const [latest] = catalogue.models.lamp.versions;
+	catalogue.models.lamp.versions.unshift({ ...latest, id: 'ddddddd', commit: 'ddddddd'.padEnd(40, '0'), date: '2026-11-04' });
+	const body = Buffer.from(JSON.stringify(catalogue));
+	const sha256 = createHash('sha256').update(body).digest('hex');
+	// The key whose public half the test site's config names.
+	const key = Buffer.from('11'.repeat(32), 'hex');
+	const tags = [['d', 'catalogue'], ['path', '/catalogue.json', sha256], ['server', 'https://blossom.example.com']];
+	const manifest = finalizeEvent({ kind: 35128, created_at: 1_800_000_000, content: '', tags }, key);
+	await page.routeWebSocket(/^wss:\/\/relay\.example\.com/, (relay) =>
+		relay.onMessage((message) => {
+			const [type, subscription] = JSON.parse(String(message));
+			if (type !== 'REQ') return;
+			relay.send(JSON.stringify(['EVENT', subscription, manifest]));
+			relay.send(JSON.stringify(['EOSE', subscription]));
+		})
+	);
+	await page.route(`https://blossom.example.com/${sha256}`, (route) => route.fulfill({ body, headers: { 'access-control-allow-origin': '*' } }));
+	await page.goto(CATALOGUE_SITE);
+	await expect(page.locator('header').getByRole('combobox', { name: 'Version' }).locator('option')).toHaveText(['latest', 'ddddddd · 4 Nov', 'aaaaaaa · 14 Oct', 'bbbbbbb · 7 Oct']);
 });
 
 /**

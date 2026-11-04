@@ -1,7 +1,7 @@
 // A site's catalogue: the models it shows by name, every version of each, and the files published for them, converted
 // ahead with the conversion `conversion` names. A site ships it as catalogue.json beside its page (pipeline/site.ts);
-// the web page fetches it before the app starts, the napplet carries it. Its links name a model and a version
-// (state/hash.ts). The builds read it in Node too, so this file imports nothing.
+// the web page fetches the newest one before the app starts (host/web-catalogue.ts), the napplet carries it. Its links
+// name a model and a version (state/hash.ts). The builds read it in Node too, so this file imports nothing.
 
 export type Catalogue = {
 	version: 1;

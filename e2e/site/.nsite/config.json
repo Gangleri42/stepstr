@@ -2,7 +2,7 @@
 	"id": "catalogue",
 	"title": "Catalogue test",
 	"description": "A site with a catalogue, for the browser tests.",
-	"pubkey": "0000000000000000000000000000000000000000000000000000000000000001",
+	"pubkey": "4f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa",
 	"relays": ["wss://relay.example.com"],
 	"servers": ["https://blossom.example.com"]
 }

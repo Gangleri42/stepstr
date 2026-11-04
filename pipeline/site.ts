@@ -27,16 +27,17 @@ export const escapeAttribute = (text: string) => text.replace(/&/g, '&amp;').rep
 /**
  * The module virtual:stepstr-site, which both builds generate: what the site is called, how it describes itself, its
  * Blossom servers, the napplet's role and its catalogue. The napplet carries the catalogue. The web page imports only
- * whether there is one and fetches catalogue.json (catalogueFile) as it starts: its code then stays the same from one
- * catalogue to the next, and the service worker can serve the code from its cache and the catalogue fresh.
+ * whether there is one and where its signed manifest is found, and fetches the catalogue as it starts: its code then
+ * stays the same from one catalogue to the next, and the service worker can serve the code from its cache.
  */
 export function siteModule(): Plugin {
 	const id = 'virtual:stepstr-site';
 	const resolved = `\0${id}`;
 	const exported = () => {
-		const { title, description, servers, napplet } = readConfig(SITE.config);
+		const { title, description, servers, napplet, pubkey, id: siteId, relays } = readConfig(SITE.config);
 		const catalogue = readCatalogue()?.catalogue ?? null;
-		return Object.entries({ title, description, servers, role: nappletRole(napplet), catalogue, hasCatalogue: !!catalogue })
+		const published = catalogue ? { pubkey, id: siteId, relays } : null;
+		return Object.entries({ title, description, servers, role: nappletRole(napplet), catalogue, hasCatalogue: !!catalogue, published })
 			.map(([name, value]) => `export const ${name} = ${JSON.stringify(value)};`)
 			.join('\n');
 	};

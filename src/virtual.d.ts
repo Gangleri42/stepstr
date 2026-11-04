@@ -14,4 +14,6 @@ declare module 'virtual:stepstr-site' {
 	export const catalogue: import('./lib/catalogue/catalogue').Catalogue | null;
 	/** Whether the site has a catalogue, which the web page fetches as catalogue.json. */
 	export const hasCatalogue: boolean;
+	/** Where the web page finds the site's newest signed manifest; null for a site without a catalogue. */
+	export const published: import('./lib/host/web-catalogue').PublishedSite | null;
 }

@@ -63,7 +63,8 @@ The publisher spreads the files the catalogue names from `<dir>/catalogue-files/
 every configured Blossom server that takes their type. `--files-only` uploads those files alone and publishes nothing,
 so a new version's files can be on the servers before the catalogue that names them. It records the copies it checked
 in `<dir>/.cache/verified-copies.json`, so the next publish does not download them again; keep that directory out of
-git.
+git. A catalogue file never changes, so a publish leaves the copies in that record alone and asks only about new files;
+the first publish after a day, or one with `--sweep`, asks after every copy and places again what a server lost.
 
 ## Opening files
 

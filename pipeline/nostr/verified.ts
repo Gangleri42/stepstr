@@ -39,31 +39,42 @@ export function verifiedBefore({ manifests, converter, catalogue, record = [] }:
 	return pairs;
 }
 
-type VerifiedRecord = { version: 1; copies: [server: string, sha256: string][] };
+type VerifiedRecord = { version: 1; copies: [server: string, sha256: string][]; swept?: number };
+
+function parseRecord(file: string): VerifiedRecord | null {
+	if (!existsSync(file)) return null;
+	try {
+		const record = JSON.parse(readFileSync(file, 'utf8')) as VerifiedRecord;
+		return record.version === 1 && Array.isArray(record.copies) ? record : null;
+	} catch {
+		return null;
+	}
+}
 
 /** The pairs in a files-only run's record; none when there is no record or it cannot be read. */
 export function readRecord(file: string): string[] {
-	if (!existsSync(file)) return [];
-	try {
-		const record = JSON.parse(readFileSync(file, 'utf8')) as VerifiedRecord;
-		if (record.version !== 1 || !Array.isArray(record.copies)) return [];
-		return record.copies.filter((c) => Array.isArray(c) && typeof c[0] === 'string' && /^[0-9a-f]{64}$/.test(c[1])).map(([server, sha256]) => `${server} ${sha256}`);
-	} catch {
-		return [];
-	}
+	const copies = parseRecord(file)?.copies ?? [];
+	return copies.filter((c) => Array.isArray(c) && typeof c[0] === 'string' && /^[0-9a-f]{64}$/.test(c[1])).map(([server, sha256]) => `${server} ${sha256}`);
+}
+
+/** When a publish last asked every server after every copy, in unix seconds; null when none has on this record. */
+export function readSwept(file: string): number | null {
+	const swept = parseRecord(file)?.swept;
+	return typeof swept === 'number' ? swept : null;
 }
 
 /**
  * Writes what a spread verified into the record: each copy it holds, and of the copies it was asked about on these
- * servers, none that it no longer holds, so a copy that failed its check is downloaded again next time.
+ * servers, none that it no longer holds, so a copy that failed its check is downloaded again next time. The time of
+ * the last sweep stays until a run passes a newer one.
  */
-export function writeRecord(file: string, spread: Spread, servers: string[], entries: { sha256: string }[]) {
+export function writeRecord(file: string, spread: Spread, servers: string[], entries: { sha256: string }[], swept = readSwept(file)) {
 	const asked = new Set(servers.flatMap((server) => entries.map((entry) => `${server} ${entry.sha256}`)));
 	const pairs = new Set(readRecord(file).filter((pair) => !asked.has(pair)));
 	for (const [sha256, holders] of spread.holders) for (const server of holders) pairs.add(`${server} ${sha256}`);
 	const copies = [...pairs].sort().map((pair) => pair.split(' ') as [string, string]);
 	mkdirSync(dirname(file), { recursive: true });
 	// Written whole and then moved, so a run that stops halfway leaves the old record.
-	writeFileSync(`${file}.tmp`, `${JSON.stringify({ version: 1, copies } satisfies VerifiedRecord)}\n`);
+	writeFileSync(`${file}.tmp`, `${JSON.stringify({ version: 1, copies, ...(swept === null ? {} : { swept }) } satisfies VerifiedRecord)}\n`);
 	renameSync(`${file}.tmp`, file);
 }

@@ -4,7 +4,8 @@
 // uploaded. Last, every copy that no earlier publish verified, that was placed in this run or that a server reports at
 // another size is downloaded and hashed. A server that refuses a type, or one file, goes without it and is reported;
 // the run fails only when the site's own server lacks a file or a file reaches fewer public servers than asked for.
-// A server that says it is full, or refuses several files in a row, is asked for no more this run.
+// A server that says it is full, or refuses several files in a row, is asked for no more this run. Files the caller
+// trusts are left alone wherever an earlier publish verified them, so a publish costs what it adds.
 //
 // Uploads are authorised by kind 24242 events. One covers a batch of files on every server, so a run signs a handful.
 // A server that refuses it gets one signed just before each transfer from then on. In October 2026 nostr.download and
@@ -27,6 +28,8 @@ export type SpreadOptions = {
 	entries: FileEntry[];
 	/** "<server> <sha256>" for each copy an earlier publish downloaded and hashed. */
 	verifiedBefore: Set<string>;
+	/** Whether a copy of this file in verifiedBefore can be counted without asking its server. */
+	trusted?(entry: FileEntry): boolean;
 	/** Servers besides the site's own that every file must reach. */
 	minPublic: number;
 	/** A file's bytes, for an upload: the local file, or a copy from the site's own server for one carried over. */
@@ -99,6 +102,7 @@ const unauthorised = (r: Result) => r.status === 400 || r.status === 401 || r.st
  * or unavailable".
  */
 const full = (r: Result) => r.status === 507 || /quota/i.test(r.reason);
+const LEFT_ALONE: Result = { ok: true, status: 200, reason: 'verified before' };
 const NOT_ASKED: Result = { ok: false, status: 507, reason: 'asked for no more files this run' };
 
 export async function spread(options: SpreadOptions): Promise<Spread> {
@@ -160,7 +164,9 @@ export async function spread(options: SpreadOptions): Promise<Spread> {
 	const closed = new Set<string>();
 	const refusalsInARow = new Map<string, number>();
 	const lost: FileEntry[] = [];
+	let leftAlone = 0;
 	const place = async (server: string, entry: FileEntry): Promise<Result> => {
+		if (options.trusted?.(entry) && options.verifiedBefore.has(pair(server, entry))) return LEFT_ALONE;
 		const found = await head(server, entry.sha256);
 		if (found.status === 200) {
 			if (entry.bytes && found.size !== null && found.size !== entry.bytes) recheck.add(pair(server, entry));
@@ -193,7 +199,7 @@ export async function spread(options: SpreadOptions): Promise<Spread> {
 			const server = others[i];
 			if (r.ok) {
 				// Only a file it took shows it still takes files; finding an old one there says nothing.
-				if (r.reason !== 'present') refusalsInARow.delete(server);
+				if (r !== LEFT_ALONE && r.reason !== 'present') refusalsInARow.delete(server);
 				return void holding.add(server);
 			}
 			if (r === NOT_ASKED) return;
@@ -208,8 +214,10 @@ export async function spread(options: SpreadOptions): Promise<Spread> {
 			}
 		});
 		placed.set(entry.sha256, holding);
-		log(`  ${entry.path} (${(entry.bytes / 1e3).toFixed(0)} kB) on ${holding.size} servers`);
+		if (mine === LEFT_ALONE && results.every((r) => r === LEFT_ALONE)) leftAlone++;
+		else log(`  ${entry.path} (${(entry.bytes / 1e3).toFixed(0)} kB) on ${holding.size} servers`);
 	}
+	if (leftAlone) log(`  ${leftAlone} files left alone, verified before on every server that takes them`);
 
 	// ---- every copy downloaded and hashed once, the servers at once
 	const kept = entries.filter((entry) => !lost.includes(entry));

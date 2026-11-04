@@ -144,6 +144,29 @@ describe('spreading files over Blossom servers', () => {
 		expect(lines.filter((line) => line.includes(`${B} did not take`))).toHaveLength(3);
 	});
 
+	it('leaves a trusted copy alone where an earlier publish verified it, and still places it elsewhere', async () => {
+		const servers = world({ [OWN]: { blobs: new Map([[model.sha256, model.data]]) }, [A]: { blobs: new Map([[model.sha256, model.data]]) }, [B]: {} });
+		const verifiedBefore = new Set([`${OWN} ${model.sha256}`, `${A} ${model.sha256}`]);
+		const out = await spread(options([OWN, A, B], [model], { verifiedBefore, trusted: () => true }));
+		expect(out.holders.get(model.sha256)).toEqual([OWN, A, B]);
+		// The one HEAD is the type probe; no copy check and no download.
+		expect(servers[OWN].calls).toEqual([`HEAD /${model.sha256}`]);
+		expect(servers[A].calls).toEqual([`HEAD /${model.sha256}`]);
+		expect(servers[B].blobs.has(model.sha256)).toBe(true);
+	});
+
+	it('says how many files it left alone instead of listing them, and asks after the rest', async () => {
+		const held = () => new Map([[model.sha256, model.data]]);
+		const servers = world({ [OWN]: { blobs: held() }, [A]: { blobs: held() } });
+		const verifiedBefore = new Set([`${OWN} ${model.sha256}`, `${A} ${model.sha256}`]);
+		const lines: string[] = [];
+		await spread(options([OWN, A], [model, page], { verifiedBefore, trusted: (entry) => entry === model, log: (line) => lines.push(line) }));
+		expect(lines).toContain('  1 files left alone, verified before on every server that takes them');
+		expect(lines.some((line) => line.includes('/lamp.glb ('))).toBe(false);
+		expect(lines.some((line) => line.includes('/index.html ('))).toBe(true);
+		expect(servers[A].blobs.has(page.sha256)).toBe(true);
+	});
+
 	it('verifies each copy by its bare hash, which a server that knows no extension for it still serves', async () => {
 		const servers = world({ [OWN]: {}, [A]: { bareOnly: true } });
 		const out = await spread(options([OWN, A], [page, model]));

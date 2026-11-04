@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { fixtureCatalogue, hash } from '../../src/lib/catalogue/fixture.ts';
 import { KIND } from './config.ts';
 import type { Spread } from './spread.ts';
-import { readRecord, verifiedBefore, writeRecord } from './verified.ts';
+import { readRecord, readSwept, verifiedBefore, writeRecord } from './verified.ts';
 
 const OWN = 'https://own.example.com';
 const A = 'https://a.example.com';
@@ -64,6 +64,17 @@ describe("a files-only run's record", () => {
 		expect(readRecord(file)).toEqual([]);
 		writeFileSync(file, JSON.stringify({ version: 1, copies: [[A, 'not a hash'], 'x', [B, lampGlb]] }));
 		expect(readRecord(file)).toEqual([`${B} ${lampGlb}`]);
+	});
+
+	it('keeps the time of the last sweep until a run passes a newer one', () => {
+		const file = recordFile();
+		writeRecord(file, spreadOf([[lampGlb, [OWN]]]), [OWN], [{ sha256: lampGlb }]);
+		expect(readSwept(file)).toBeNull();
+		writeRecord(file, spreadOf([[lampGlb, [OWN]]]), [OWN], [{ sha256: lampGlb }], 1000);
+		expect(readSwept(file)).toBe(1000);
+		writeRecord(file, spreadOf([[lampGlb, [OWN]]]), [OWN], [{ sha256: lampGlb }]);
+		expect(readSwept(file)).toBe(1000);
+		expect(readRecord(file)).toEqual([`${OWN} ${lampGlb}`]);
 	});
 
 	it("holds each copy a run verified, keeps other runs' copies, and drops one this run no longer holds", () => {

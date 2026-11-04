@@ -4,17 +4,19 @@
 //   2. spreads the files, and those the site's catalogue names (catalogue-files/), over the Blossom servers
 //      (nostr/spread.ts): each server takes the types it accepts, from the project's server by mirroring or by upload
 //   3. downloads and hashes each copy where no earlier publish verified it, where it had to be placed again, or where
-//      the server reports another size; every file must reach --min-public servers besides the project's
+//      the server reports another size; every file must reach --min-public servers besides the project's. A catalogue
+//      file never changes, so a copy verified before is left alone unless this run is a sweep
 //   4. merges and publishes the relay list (10002) and server list (10063)
 //   5. publishes the site manifest (35128) with a snapshot (5128), then the napplet manifest (35129) with its snapshot (5129)
 //   6. fetches everything back from the relays and checks the signatures and the manifests
-// Usage: npm run publish:nostr -- [--if-changed] [--dry-run] [--skip-build] [--skip-napplet] [--replace-lists] [--no-snapshot] [--min-public N]
+// Usage: npm run publish:nostr -- [--if-changed] [--dry-run] [--skip-build] [--skip-napplet] [--replace-lists] [--no-snapshot] [--min-public N] [--sweep]
 //        npm run publish:nostr -- --files-only [--dry-run] [--min-public N]
 // --files-only does step 2 for the catalogue's files alone, verified as step 3 verifies them, and stops: no build, no
 // site or napplet files, no lists, no manifests, no snapshots. A site's builder runs it to have a new version's files on
 // the servers before the catalogue that names them is published. With --dry-run it says which files each server lacks.
 // The copies a run verified, files-only or not, go in a record beside the site (nostr/verified.ts), which every later
-// run reads.
+// run reads. --sweep asks every server after every copy and places again what one lost, as the first publish a day
+// does by itself.
 // It runs only where STEPSTR_PUBLISHER=1 is set, beside a saved signer: a NIP-46 session with Amber on a phone, or a key
 // (nostr/signer.ts says where each is kept). Anywhere else it refuses to start, dry runs included, since those talk to
 // the relays and servers too.
@@ -38,7 +40,7 @@ import { Relays, type PublishReport } from './nostr/relays.ts';
 import { openSigner, type Signer } from './nostr/signer.ts';
 import { uploadFiles } from './nostr/files-only.ts';
 import { batchedAuth, holdingAll, siteServers, spread, SpreadError, type Spread } from './nostr/spread.ts';
-import { readRecord, verifiedBefore, writeRecord } from './nostr/verified.ts';
+import { readRecord, readSwept, verifiedBefore, writeRecord } from './nostr/verified.ts';
 import { readCatalogue, SITE, STEPSTR_DIR } from './site.ts';
 
 const log = (line = '') => console.log(line);
@@ -63,7 +65,8 @@ const { values } = (() => {
 				'replace-lists': { type: 'boolean' },
 				'no-snapshot': { type: 'boolean' },
 				'files-only': { type: 'boolean' },
-				'min-public': { type: 'string', default: '3' }
+				'min-public': { type: 'string', default: '3' },
+				sweep: { type: 'boolean' }
 			}
 		});
 	} catch (err) {
@@ -80,7 +83,8 @@ const opts = {
 	replaceLists: !!values['replace-lists'],
 	snapshot: !values['no-snapshot'],
 	filesOnly: !!values['files-only'],
-	minPublic
+	minPublic,
+	sweep: !!values.sweep
 };
 // The other flags are about the site, the napplet and the manifests, which a files-only run leaves alone.
 const siteFlags = (['if-changed', 'skip-build', 'skip-napplet', 'replace-lists', 'no-snapshot'] as const).filter((flag) => values[flag]);
@@ -277,13 +281,19 @@ const before = verifiedBefore({
 	record: readRecord(SITE.verified)
 });
 
-log('\nchecking servers (BUD-06 preflight per file type), then placing files');
+const SWEEP_EVERY = 24 * 3600;
+const swept = readSwept(SITE.verified);
+const sweep = opts.sweep || swept === null || unixNow() - swept >= SWEEP_EVERY;
+const catalogueHashes = new Set(catalogued.map((entry) => entry.sha256));
+
+log(`\nchecking servers (BUD-06 preflight per file type), then placing files${sweep ? ', asking after every copy' : ''}`);
 let spreadOut: Spread;
 try {
 	spreadOut = await spread({
 		servers: config.servers,
 		entries: everything,
 		verifiedBefore: before,
+		trusted: sweep ? undefined : (entry) => catalogueHashes.has(entry.sha256),
 		minPublic: opts.minPublic,
 		// The local file, or for a chunk carried over from the previous deploy, a verified copy from the project's server.
 		bytesOf: async (entry) => (entry.file ? readFileSync(entry.file) : fromOwnServer(entry.sha256, entry.path)),
@@ -295,7 +305,7 @@ try {
 	fail(err instanceof SpreadError ? err.message : String(err));
 }
 // What this run verified, for the next one, as a files-only run keeps it.
-writeRecord(SITE.verified, spreadOut, config.servers, catalogued);
+writeRecord(SITE.verified, spreadOut, config.servers, catalogued, sweep ? unixNow() : swept);
 const lostPrevious = new Set(spreadOut.lost.map((entry) => entry.path));
 const carried = previous.filter((p) => !lostPrevious.has(p.path));
 if (lostPrevious.size) log(`  ${lostPrevious.size} previous chunk paths are no longer on ${ownServer} and are dropped`);

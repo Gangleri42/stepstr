@@ -29,7 +29,7 @@ describe('a site catalogue', () => {
 	it('is refused when it is not one', () => {
 		expect(refusal(null)).toMatch(/catalogue must be an object/);
 		expect(refusal([])).toMatch(/catalogue must be an object/);
-		expect(refusal(changed((c) => (c.version = 2)))).toMatch(/catalogue.version must be 1/);
+		expect(refusal(changed((c) => (c.version = 1)))).toMatch(/catalogue.version must be 2/);
 		expect(refusal(changed((c) => (c.models = {})))).toMatch(/catalogue.models must name at least one model/);
 		expect(refusal(changed((c) => delete c.conversion))).toMatch(/catalogue.conversion is missing/);
 	});
@@ -157,9 +157,9 @@ describe('a site catalogue', () => {
 		expect(refusal(changed((c) => (c.models.lamp.versions[0].notes = ['A note.'])))).toMatch(/versions\[0\]\.notes is not a catalogue field/);
 	});
 
-	it('takes a slot with a shift, or none', () => {
-		expect(parseCatalogue(changed((c) => (c.models.clock.versions[0].slot = { id: 'a1b2c3', fix: [0, 0.5, -1] }))).models.clock.versions[0].slot).toEqual({ id: 'a1b2c3', fix: [0, 0.5, -1] });
+	it('takes a slot by its part id, or none', () => {
+		expect(parseCatalogue(changed((c) => (c.models.clock.versions[0].slot = { id: 'a1b2c3' }))).models.clock.versions[0].slot).toEqual({ id: 'a1b2c3' });
 		expect(parseCatalogue(changed((c) => (c.models.clock.versions[0].slot = null))).models.clock.versions[0].slot).toBeNull();
-		expect(refusal(changed((c) => (c.models.clock.versions[0].slot = { id: 'a1b2c3', fix: [0, 1] })))).toMatch(/slot.fix must be three numbers/);
+		expect(refusal(changed((c) => (c.models.clock.versions[0].slot = { id: 'not an id' })))).toMatch(/slot.id must be a part id/);
 	});
 });

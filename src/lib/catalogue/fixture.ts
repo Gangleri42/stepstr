@@ -19,7 +19,7 @@ const version = (model: string, id: string, date: string): CatalogueVersion => {
 
 export function fixtureCatalogue(): Catalogue {
 	return {
-		version: 1,
+		version: 2,
 		conversion: hash('conversion'),
 		servers: ['https://blossom.example.com', 'https://cdn.example.com'],
 		home: 'stand',

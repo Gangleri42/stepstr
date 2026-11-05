@@ -97,7 +97,7 @@ export function publishedCatalogue(site: PublishedSite) {
 	catalogue.conversion = site.conversion;
 	for (const model of Object.values(catalogue.models)) for (const version of model.versions) version.files = site.lamp;
 	const [latest, older] = catalogue.models.lamp.versions;
-	latest.slot = { id: SLOT, fix: [0, 0, 40] };
+	latest.slot = { id: SLOT };
 	older.slot = null;
 	const revision = { id: 'ddddddd', commit: 'ddddddd'.padEnd(40, '0'), date: '2026-10-12', subject: 'Twin the lamp', step: site.twin.step };
 	catalogue.models.lamp.companions = {

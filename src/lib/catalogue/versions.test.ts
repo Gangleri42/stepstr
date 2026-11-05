@@ -81,7 +81,7 @@ describe('the companion a catalogue model shows', () => {
 		expect(none).toEqual({ choice: { kind: 'cad', possible: true }, missing: 'abcdef0' });
 	});
 
-	it('is the part as in CAD where the version has no slot, or one the companion does not line up with', () => {
+	it('is the part as in CAD where the version has no slot', () => {
 		expect(chooseCompanion(clock, { ...clock.versions[0], slot: null }, 'eeeeeee', false)).toEqual({ choice: { kind: 'cad', possible: false } });
 		expect(chooseCompanion(clock, { ...clock.versions[0], slot: undefined }, undefined, false)).toEqual({ choice: { kind: 'cad', possible: false } });
 		expect(chosen('#/stand?b=eeeeeee').shown).toEqual({ kind: 'cad', possible: false });

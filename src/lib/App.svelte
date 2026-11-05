@@ -21,7 +21,7 @@
 	import type { MeasureStatus, MeasureTool, Outcome } from '$lib/viewer/measure/tool';
 	import type { Part, PartIndex } from '$lib/viewer/parts';
 	import { applyVisibility } from '$lib/viewer/parts';
-	import { COMPANION_SOURCE, fitCompanion } from '$lib/viewer/companion';
+	import { COMPANION_SOURCE, fitCompanion, type Placement } from '$lib/viewer/companion';
 	import { applyFinishes } from '$lib/viewer/finishes';
 	import type { NamedView, RenderOptions, Viewer } from '$lib/viewer/scene';
 	import type { Object3D } from 'three';
@@ -116,7 +116,7 @@
 	/** The catalogue model the route names, as the catalogue resolves it, for the picker. */
 	const picked = $derived(view.source?.kind === 'catalogue' ? (fileOf(view.source)?.listed ?? null) : null);
 	/** The companion revision in the slot of the model on screen, and one that was asked for and could not be fitted. */
-	let companionShown = $state.raw<{ track: CompanionTrack; revision: CompanionRevision } | null>(null);
+	let companionShown = $state.raw<{ track: CompanionTrack; revision: CompanionRevision; placement: Placement } | null>(null);
 	let companionFailed = $state.raw<{ id: string; reason: string } | null>(null);
 	/** What a link to a version or a companion revision the catalogue does not list is told: it shows other bytes. */
 	function lost({ model, version, missing, companion, companionMissing }: Resolved) {
@@ -299,7 +299,7 @@
 		stage = { label: `Opening ${wanted.name ?? listed?.model.title ?? 'the file'}`, fraction: null };
 		const onStage = (next: Stage) => (stage = next);
 		let parsed: Object3D | null = null;
-		let fitted = false;
+		let fitted: Placement | null = null;
 		try {
 			const opened = await open(host, file, wanted.name, onStage, signal);
 			const { model: converted, file: loaded, kept, seen } = opened;
@@ -337,8 +337,7 @@
 					const own = choice.revision.finishes;
 					if (own?.length) applyFinishes(parsed, own);
 					const { label } = choice.track;
-					fitCompanion(root, parsed, choice.slot, { name: label, component: `${label} ${choice.revision.id}` });
-					fitted = true;
+					fitted = fitCompanion(root, parsed, choice.slot, { name: label, component: `${label} ${choice.revision.id}` });
 				} catch (err) {
 					misfit = err instanceof Error ? err.message : String(err);
 				}
@@ -372,7 +371,7 @@
 				warnings: converted.warnings
 			};
 			measureData = { key: shownKey, data: companion && fitted ? [converted.measure, companion.model.measure] : [converted.measure] };
-			companionShown = choice && fitted ? { track: choice.track, revision: choice.revision } : null;
+			companionShown = choice && fitted ? { track: choice.track, revision: choice.revision, placement: fitted } : null;
 			companionFailed = choice && !fitted ? { id: choice.revision.id, reason: misfit } : null;
 			stepOpen = false;
 			measureError = '';
@@ -923,7 +922,7 @@
 				<div class="notes companion">
 					{#if picked.version.slot === null}
 						<span class="title">{track.label}</span>
-						<span class="warn">The {track.label} does not line up with this version, so it shows as in CAD.</span>
+						<span class="warn">This version has no {track.label} part to replace, so it shows as in CAD.</span>
 					{:else}
 						<label>
 							<span class="title">{track.label}</span>
@@ -935,6 +934,9 @@
 							</select>
 						</label>
 						<span>{choice.kind === 'revision' ? choice.revision.subject || track.source : `The ${track.label} exported with this version`}</span>
+						{#if companionShown && choice.kind === 'revision' && companionShown.revision.id === choice.revision.id && companionShown.placement !== 'as drawn'}
+							<span>{companionShown.placement === 'turned' ? 'Turned over and centred' : 'Centred'} on the {track.label} in CAD.</span>
+						{/if}
 						{#if companionFailed && choice.kind === 'revision' && companionFailed.id === choice.revision.id}
 							<span class="warn">{companionFailed.id} could not be fitted: {companionFailed.reason}</span>
 						{/if}

@@ -181,7 +181,7 @@ test.describe('with published files', () => {
 		const requests = await serveSite(page, site);
 		await page.goto(`${CATALOGUE_SITE}#/lamp@bbbbbbb`);
 		await expect(page.locator('html')).toHaveAttribute('data-glb', site.lamp.glb.sha256, { timeout: 60_000 });
-		await expect(page.locator('aside.panel')).toContainText('The Insert does not line up with this version');
+		await expect(page.locator('aside.panel')).toContainText('This version has no Insert part to replace');
 		await expect(page.getByRole('list', { name: 'Notes on the Insert' }).getByRole('listitem')).toHaveText([TRACK_NOTE]);
 		await expect(page.locator('html')).not.toHaveAttribute('data-companion');
 

@@ -4,7 +4,8 @@
 // name a model and a version (state/hash.ts). The builds read it in Node too, so this file imports nothing.
 
 export type Catalogue = {
-	version: 1;
+	/** 2 since a slot names only its part and the viewer places a companion: a page of version 1 keeps the copy beside it. */
+	version: 2;
 	/** The ABOUT.conversion the published files were made with; a viewer of another conversion converts the STEP. */
 	conversion: string;
 	/** Blossom servers that hold the published files, fastest first. */
@@ -37,8 +38,8 @@ export type CatalogueVersion = {
 	files: { glb: Blob; measure: Blob };
 	/** How its parts are shown, resolved for this version by the site's builder. */
 	finishes?: Finish[];
-	/** The part a companion takes the place of, and a shift for exports off the companion's frame. */
-	slot?: { id: string; fix?: [number, number, number] } | null;
+	/** The part a companion takes the place of; null when the version has none. */
+	slot?: { id: string } | null;
 };
 
 export type CompanionTrack = {
@@ -164,11 +165,8 @@ const finish = (value: unknown, at: string, problems: Problems) =>
 		},
 		{ roughness: fraction, opacity: fraction }
 	);
-const triple = (value: unknown, at: string, problems: Problems) => {
-	if (!Array.isArray(value) || value.length !== 3 || value.some((v) => typeof v !== 'number' || !Number.isFinite(v))) problems.push(`${at} must be three numbers`);
-};
 const slot = (value: unknown, at: string, problems: Problems) => {
-	if (value !== null) object(value, at, problems, { id: matching(/^[0-9a-z]+$/, 'a part id') }, { fix: triple });
+	if (value !== null) object(value, at, problems, { id: matching(/^[0-9a-z]+$/, 'a part id') });
 };
 
 function version(value: unknown, at: string, problems: Problems) {
@@ -228,7 +226,7 @@ function model(value: unknown, at: string, problems: Problems) {
 export function parseCatalogue(value: unknown): Catalogue {
 	const problems: Problems = [];
 	object(value, 'catalogue', problems, {
-		version: oneOf([1]),
+		version: oneOf([2]),
 		conversion: sha256,
 		servers: list(server, true),
 		home: text,
